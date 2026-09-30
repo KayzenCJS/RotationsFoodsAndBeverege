@@ -150,6 +150,97 @@ body {
 .section-title h3 { color:var(--text-dark); font-size:1.5rem; font-weight:600; display:flex; align-items:center; gap:0.75rem; }
 .section-title h3 i { color:var(--primary-color); }
 
+.employee-count-badge {
+    background:linear-gradient(135deg, #10b981, #059669);
+    color:white;
+    padding:0.5rem 1rem;
+    border-radius:20px;
+    font-size:0.9rem;
+    font-weight:600;
+    box-shadow:0 2px 8px rgba(16, 185, 129, 0.3);
+}
+
+.versatile-badge {
+    background:linear-gradient(135deg, #f59e0b, #d97706);
+    color:white;
+    padding:0.25rem 0.75rem;
+    border-radius:12px;
+    font-size:0.75rem;
+    font-weight:600;
+    margin-left:0.5rem;
+    display:inline-block;
+}
+
+/* ==================== HISTORY SECTION ==================== */
+.history-content { margin-top:1rem; }
+.history-date-header { text-align:center; margin-bottom:2rem; padding:1rem; background:#f8fafc; border-radius:12px; }
+.history-date-header h4 { color:#1e40af; font-size:1.3rem; margin:0; }
+.history-section { margin-bottom:2rem; background:white; padding:1.5rem; border-radius:12px; border:1px solid #e2e8f0; }
+.history-section h5 { color:#374151; font-size:1.1rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem; }
+.history-table { overflow-x:auto; }
+.history-table table { width:100%; border-collapse:collapse; }
+.history-table th { background:#f3f4f6; padding:0.75rem; text-align:left; font-weight:600; color:#374151; border-bottom:2px solid #d1d5db; }
+.history-table td { padding:0.75rem; border-bottom:1px solid #e5e7eb; color:#6b7280; }
+.history-table tr:hover { background:#f9fafb; }
+
+/* ==================== LOCATION MANAGEMENT ==================== */
+.location-management-card { background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:1.5rem; transition:all 0.3s; }
+.location-management-card:hover { box-shadow:0 4px 12px rgba(0,0,0,0.1); transform:translateY(-2px); }
+.location-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }
+.location-name { font-weight:600; color:#374151; font-size:1.1rem; }
+.location-status { padding:0.25rem 0.75rem; border-radius:12px; font-size:0.85rem; font-weight:600; }
+.location-status[style*="#10b981"] { background:#d1fae5; color:#059669; }
+.location-status[style*="#ef4444"] { background:#fee2e2; color:#dc2626; }
+.location-actions { display:flex; gap:0.5rem; flex-wrap:wrap; }
+.btn-sm { padding:0.5rem 1rem; font-size:0.85rem; }
+.btn-danger { background:linear-gradient(135deg, #ef4444, #dc2626); color:white; border:none; }
+.btn-success { background:linear-gradient(135deg, #10b981, #059669); color:white; border:none; }
+.form-actions { display:flex; gap:1rem; justify-content:flex-end; margin-top:1.5rem; }
+
+/* ==================== QUERY TABS ==================== */
+.query-tabs { display:flex; gap:0.5rem; margin-bottom:1rem; }
+.query-tab { padding:0.5rem 1rem; border:1px solid #d1d5db; border-radius:8px; background:white; cursor:pointer; transition:all 0.3s; }
+.query-tab:hover { background:#f3f4f6; }
+.query-tab.active { background:#3b82f6; color:white; border-color:#3b82f6; }
+
+/* ==================== LOCATION QUERY ==================== */
+.location-query-header { text-align:center; margin-bottom:1.5rem; padding:1rem; background:#f8fafc; border-radius:12px; }
+.location-query-header h4 { color:#1e40af; margin:0 0 0.5rem 0; }
+.location-query-header p { color:#6b7280; margin:0; }
+.location-stats-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px,1fr)); gap:1rem; }
+.location-stat-card { background:white; padding:1.5rem; border-radius:12px; border:1px solid #e2e8f0; box-shadow:0 2px 8px rgba(0,0,0,0.1); }
+.stat-employee-name { font-weight:600; color:#374151; font-size:1.1rem; margin-bottom:0.5rem; }
+.stat-employee-details { color:#6b7280; font-size:0.9rem; margin-bottom:1rem; }
+.stat-assignment-count { display:flex; align-items:center; gap:0.5rem; }
+.count-number { font-size:2rem; font-weight:700; color:#3b82f6; }
+.count-label { color:#6b7280; font-size:0.875rem; }
+
+/* ==================== STAFFING RULES ==================== */
+.staffing-rules-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:1rem; }
+.staffing-rule-card { background:white; padding:1.5rem; border-radius:12px; border:1px solid #e2e8f0; box-shadow:0 2px 8px rgba(0,0,0,0.1); }
+.rule-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; padding-bottom:0.5rem; border-bottom:1px solid #f1f5f9; }
+.rule-location { font-weight:600; color:#374151; font-size:1.1rem; }
+.rule-status { padding:0.25rem 0.75rem; border-radius:12px; font-size:0.75rem; font-weight:600; }
+.rule-status.active { background:#d1fae5; color:#059669; }
+.rule-status.inactive { background:#fee2e2; color:#dc2626; }
+.rule-details { margin-bottom:1rem; }
+.rule-detail { display:flex; justify-content:space-between; padding:0.5rem 0; border-bottom:1px solid #f9fafb; }
+.rule-label { color:#6b7280; font-size:0.875rem; }
+.rule-value { color:#374151; font-weight:500; font-size:0.875rem; }
+.rule-actions { display:flex; gap:0.5rem; justify-content:flex-end; }
+
+/* ==================== MODAL STYLES ENHANCEMENTS ==================== */
+.modal-content { max-width:500px; width:90%; margin:10% auto; background:white; border-radius:16px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25); animation:modalSlideIn 0.3s ease-out; }
+@keyframes modalSlideIn { from { opacity:0; transform:translateY(-50px); } to { opacity:1; transform:translateY(0); } }
+.modal-header { display:flex; justify-content:space-between; align-items:center; padding:1.5rem; border-bottom:1px solid #e2e8f0; }
+.modal-header h3 { margin:0; color:#1e40af; }
+.form-content { padding:1.5rem; }
+.form-group { margin-bottom:1rem; }
+.form-group label { display:block; margin-bottom:0.5rem; font-weight:500; color:#374151; }
+.form-group input, .form-group select, .form-group textarea { width:100%; padding:0.75rem; border:1px solid #d1d5db; border-radius:8px; font-size:1rem; transition:border-color 0.3s; }
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59, 130, 246, 0.1); }
+.form-row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+
 /* ==================== EMPLOYEES ==================== */
 .employees-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px,1fr)); gap:1.5rem; }
 .employee-card {
