@@ -34,8 +34,17 @@ function setupNavigation() {
 
     document.querySelectorAll('a[href^="#"]').forEach(anchor => {
         anchor.addEventListener('click', function(e) {
+            // Skip if the anchor has an onclick handler
+            if (this.getAttribute('onclick')) {
+                return;
+            }
             e.preventDefault();
-            const target = document.querySelector(this.getAttribute('href'));
+            const href = this.getAttribute('href');
+            // Skip empty href or just "#"
+            if (!href || href === '#') {
+                return;
+            }
+            const target = document.querySelector(href);
             if (target) target.scrollIntoView({ behavior:'smooth', block:'start' });
         });
     });
@@ -59,29 +68,6 @@ function showNotification(message, type = 'info') {
         setTimeout(() => notification.remove(), 300);
     }, 4000);
 }
-
-// ============================================
-// CONTACT FORM
-// ============================================
-document.getElementById('contactForm').addEventListener('submit', function(e) {
-    e.preventDefault();
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const email = document.getElementById('email').value;
-    if (!emailRegex.test(email)) {
-        showNotification('Por favor ingresa un email válido.', 'error');
-        return;
-    }
-    const btn = this.querySelector('button[type="submit"]');
-    const original = btn.textContent;
-    btn.textContent = 'Enviando...';
-    btn.disabled = true;
-    setTimeout(() => {
-        showNotification('¡Mensaje enviado con éxito!', 'success');
-        this.reset();
-        btn.textContent = original;
-        btn.disabled = false;
-    }, 1500);
-});
 
 // ============================================
 // STORYLAND LOCATIONS
@@ -156,16 +142,6 @@ let locations = [
         icon: 'fa-snowflake',
         description: 'Helados de perlas congeladas',
         requiredRoles: ['cashier'],
-        servesAlcohol: false
-    },
-    {
-        id: 'sandwich-oasis',
-        name: 'Sandwich Oasis',
-        type: 'food-beverage',
-        category: 'Sandwiches',
-        icon: 'fa-bread-slice',
-        description: 'Sandwiches frescos y comida rápida',
-        requiredRoles: ['cashier', 'server', 'cook'],
         servesAlcohol: false
     },
     {
@@ -265,11 +241,14 @@ let locations = [
 // DATA STORE
 // ============================================
 let employees = [];
+window.employeeSection = window.employeeSection || 'all';
 let tasks = [];
 let currentAssignments = [];
+let currentLocationDisables = []; // Track location disables for current date
+let currentBreaks = []; // Break configurations for current date
 let currentEditId = null;
 let currentTaskEditId = null;
-let currentLang = 'es';
+let currentLang = localStorage.getItem('appLanguage') || 'es';
 
 // ============================================
 // CONFIGURATION - New Hampshire Labor Laws
@@ -317,7 +296,16 @@ async function switchType(type) {
 
     // Close admin panel if open
     document.getElementById('adminLocationsSection').style.display = 'none';
-    document.getElementById('adminStaffingSection').style.display = 'none';
+    document.getElementById('adminClosureHistorySection').style.display = 'none';
+
+    // Restore the main demo sections if they were hidden by Admin/Tabs logic
+    document.querySelectorAll('.demo-section').forEach(section => {
+        if (section.id === 'adminLocationsSection' || section.id === 'adminClosureHistorySection') {
+            section.style.display = 'none';
+        } else {
+            section.style.display = '';
+        }
+    });
 
     showNotification(`Cargando datos de ${type === 'foods' ? 'Foods' : 'Retail'}...`, 'info');
     
@@ -326,6 +314,8 @@ async function switchType(type) {
         employees = [];
         tasks = [];
         currentAssignments = [];
+        currentLocationDisables = [];
+        currentBreaks = [];
         
         // Fetch new data for the selected type
         const apiLocations = await fetchLocations();
@@ -359,8 +349,11 @@ async function switchType(type) {
 
         // Filter assignments by current work date and map to frontend format
         const workDate = document.getElementById('workDate');
-        const currentDate = workDate ? workDate.value : new Date().toISOString().split('T')[0];
-        currentAssignments = allAssignments.filter(a => a.work_date === currentDate).map(a => ({
+        const currentDate = workDate ? workDate.value : getCurrentDateInTimezone();
+        currentAssignments = allAssignments.filter(a => {
+            const assignmentDate = a.work_date ? a.work_date.split('T')[0] : '';
+            return assignmentDate === currentDate;
+        }).map(a => ({
             id: a.id,
             locationId: a.location_id,
             locationName: a.location_name,
@@ -374,6 +367,20 @@ async function switchType(type) {
         }));
 
         // Re-render everything (assignments after employees are loaded)
+        try {
+            const disables = await fetchLocationDisables(currentDate);
+            currentLocationDisables = disables.filter(d => !d.enabled_at);
+            try {
+                currentBreaks = await fetchBreaks(currentDate);
+            } catch (error) {
+                console.error('Error loading breaks:', error);
+                currentBreaks = [];
+            }
+        } catch (error) {
+            console.error('Error loading location disables:', error);
+            currentLocationDisables = [];
+        }
+
         renderEmployees();
         renderLocationCards();
         renderTasks();
@@ -394,7 +401,20 @@ async function switchType(type) {
 
 async function loadInitialData() {
     try {
-        setCurrentType('foods');
+        // Do not reset currentType; preserve whichever section (Foods/Retail) is active
+        setCurrentType(currentType);
+        currentLocationDisables = [];
+        currentBreaks = [];
+
+        // Restore main sections after Admin changed their display state
+        document.querySelectorAll('.demo-section').forEach(section => {
+            if (section.id === 'adminLocationsSection' || section.id === 'adminClosureHistorySection') {
+                section.style.display = 'none';
+            } else {
+                section.style.display = '';
+            }
+        });
+
         
         // Fetch and transform locations (convert snake_case to camelCase)
         const apiLocations = await fetchLocations();
@@ -429,8 +449,11 @@ async function loadInitialData() {
 
         // Filter assignments by current work date and map to frontend format
         const workDate = document.getElementById('workDate');
-        const currentDate = workDate ? workDate.value : new Date().toISOString().split('T')[0];
-        currentAssignments = allAssignments.filter(a => a.work_date === currentDate).map(a => ({
+        const currentDate = workDate ? workDate.value : getCurrentDateInTimezone();
+        currentAssignments = allAssignments.filter(a => {
+            const assignmentDate = a.work_date ? a.work_date.split('T')[0] : '';
+            return assignmentDate === currentDate;
+        }).map(a => ({
             id: a.id,
             locationId: a.location_id,
             locationName: a.location_name,
@@ -442,6 +465,20 @@ async function loadInitialData() {
             startTime: a.start_time,
             endTime: a.end_time
         }));
+
+        try {
+            const disables = await fetchLocationDisables(currentDate);
+            currentLocationDisables = disables.filter(d => !d.enabled_at);
+            try {
+                currentBreaks = await fetchBreaks(currentDate);
+            } catch (error) {
+                console.error('Error loading breaks:', error);
+                currentBreaks = [];
+            }
+        } catch (error) {
+            console.error('Error loading location disables:', error);
+            currentLocationDisables = [];
+        }
 
         renderEmployees();
         renderLocationCards();
@@ -470,7 +507,17 @@ function clearLocalStorage() {
 // HELPERS
 // ============================================
 function getRoleName(role) {
-    const map = {
+    const mapEs = {
+        'server': 'Server',
+        'cashier': 'Cajero',
+        'dishwasher': 'Lavaplatos',
+        'cook': 'Cocinero',
+        'bartender': 'Bartender',
+        'assistant-supervisor': 'Supervisor Asistente',
+        'supervisor': 'Supervisor',
+        'op': 'OP'
+    };
+    const mapEn = {
         'server': 'Server',
         'cashier': 'Cashier',
         'dishwasher': 'Dishwasher',
@@ -480,7 +527,7 @@ function getRoleName(role) {
         'supervisor': 'Supervisor',
         'op': 'OP'
     };
-    return map[role] || role;
+    return (currentLang === 'en' ? mapEn : mapEs)[role] || role;
 }
 
 function isEmployeeVersatile(emp) {
@@ -542,7 +589,7 @@ function getAvailableRoles(emp) {
 }
 
 function getSkillName(skill) {
-    const map = {
+    const mapEs = {
         'dunkin-trained': 'Dunkin\' Certified',
         'food-safety': 'Food Safety / Food Handling',
         'pos-training': 'Cash Register / POS Training',
@@ -550,16 +597,24 @@ function getSkillName(skill) {
         'retail': 'Ventas / Retail',
         'souvenirs': 'Souvenirs / Merchandising'
     };
-    return map[skill] || skill;
+    const mapEn = {
+        'dunkin-trained': 'Dunkin\' Certified',
+        'food-safety': 'Food Safety / Food Handling',
+        'pos-training': 'Cash Register / POS Training',
+        'customer-service': 'Customer Service',
+        'retail': 'Sales / Retail',
+        'souvenirs': 'Souvenirs / Merchandising'
+    };
+    return (currentLang === 'en' ? mapEn : mapEs)[skill] || skill;
 }
 
 function getEmployeeStatus(emp) {
-    if (!emp.availability) return { text: 'Disponible', class: 'status-available' };
-    if (emp.availability.isOnBreak) return { text: 'En Break', class: 'status-break' };
-    if (emp.availability.isOnTraining) return { text: 'En Training', class: 'status-training' };
-    if (emp.availability.isDayOff) return { text: 'Day Off', class: 'status-dayoff' };
-    if (emp.availability.isHoliday) return { text: 'Festivo', class: 'status-holiday' };
-    return { text: 'Disponible', class: 'status-available' };
+    if (!emp.availability) return { text: currentLang === 'en' ? 'Available' : 'Disponible', class: 'status-available' };
+    if (emp.availability.isOnBreak) return { text: currentLang === 'en' ? 'On Break' : 'En Break', class: 'status-break' };
+    if (emp.availability.isOnTraining) return { text: currentLang === 'en' ? 'On Training' : 'En Training', class: 'status-training' };
+    if (emp.availability.isDayOff) return { text: currentLang === 'en' ? 'Day Off' : 'Day Off', class: 'status-dayoff' };
+    if (emp.availability.isHoliday) return { text: currentLang === 'en' ? 'Holiday' : 'Festivo', class: 'status-holiday' };
+    return { text: currentLang === 'en' ? 'Available' : 'Disponible', class: 'status-available' };
 }
 
 function isEmployeeAvailable(emp) {
@@ -569,22 +624,29 @@ function isEmployeeAvailable(emp) {
 }
 
 function getPriorityName(p) {
-    const map = { low:'Baja', medium:'Media', high:'Alta', urgent:'Urgente' };
-    return map[p] || p;
+    const mapEs = { low:'Baja', medium:'Media', high:'Alta', urgent:'Urgente' };
+    const mapEn = { low:'Low', medium:'Medium', high:'High', urgent:'Urgent' };
+    return (currentLang === 'en' ? mapEn : mapEs)[p] || p;
 }
 
 function getTaskStatusName(s) {
-    const map = { pending:'Pendiente', 'in-progress':'En Progreso', completed:'Completada' };
-    return map[s] || s;
+    const mapEs = { pending:'Pendiente', 'in-progress':'En Progreso', completed:'Completada' };
+    const mapEn = { pending:'Pending', 'in-progress':'In Progress', completed:'Completed' };
+    return (currentLang === 'en' ? mapEn : mapEs)[s] || s;
 }
 
 function getCategoryDisplayName(c) {
-    const map = {
+    const mapEs = {
         maintenance:'🔧 Mantenimiento', cleaning:'🧹 Limpieza',
         training:'📚 Capacitación', 'customer-service':'👥 Servicio al Cliente',
         other:'📋 Otro'
     };
-    return map[c] || c;
+    const mapEn = {
+        maintenance:'🔧 Maintenance', cleaning:'🧹 Cleaning',
+        training:'📚 Training', 'customer-service':'👥 Customer Service',
+        other:'📋 Other'
+    };
+    return (currentLang === 'en' ? mapEn : mapEs)[c] || c;
 }
 
 function formatDate(d) {
@@ -600,60 +662,185 @@ function formatDate(d) {
 // ============================================
 // RENDER: EMPLOYEES
 // ============================================
+function getFilteredEmployees() {
+    const searchTerm = (document.getElementById('employeeSearch')?.value || '').toLowerCase().trim();
+    const roleFilter = document.getElementById('employeeRoleFilter')?.value || '';
+    const statusFilter = document.getElementById('employeeStatusFilter')?.value || '';
+    const typeFilter = document.getElementById('employeeTypeFilter')?.value || '';
+
+    return employees.filter(emp => {
+        const status = getEmployeeStatus(emp);
+        const statusMap = { 'status-available': 'available', 'status-break': 'break', 'status-training': 'training', 'status-dayoff': 'dayoff', 'status-holiday': 'holiday' };
+        const statusValue = statusMap[status.class] || 'available';
+
+        const matchesSearch = !searchTerm || emp.name.toLowerCase().includes(searchTerm) || `${emp.name}`.toLowerCase().includes(searchTerm) || getRoleName(emp.role).toLowerCase().includes(searchTerm) || emp.nationality.toLowerCase().includes(searchTerm);
+        const matchesRole = !roleFilter || emp.role === roleFilter;
+        const matchesStatus = !statusFilter || statusValue === statusFilter;
+        const matchesType = !typeFilter || (typeFilter === 'foods' ? currentType !== 'retail' : currentType === 'retail');
+
+        let matchesSection = true;
+        if (window.employeeSection === 'skills') {
+            matchesSection = emp.trainings && emp.trainings.length > 0;
+        } else if (window.employeeSection === 'certifications') {
+            matchesSection = emp.trainings && emp.trainings.some(t => /cert|dunkin|alcohol|food-safety/i.test(t));
+        } else if (window.employeeSection === 'availability') {
+            matchesSection = !!emp.availability;
+        } else if (window.employeeSection === 'service') {
+            matchesSection = emp.trainings && emp.trainings.some(t => /customer|service|retail|souvenirs|pos|cash/i.test(t));
+        } else if (window.employeeSection === 'retail') {
+            matchesSection = emp.trainings && emp.trainings.some(t => /retail|souvenirs|store|cash/i.test(t));
+        } else if (window.employeeSection === 'history') {
+            matchesSection = true;
+        }
+
+        return matchesSearch && matchesRole && matchesStatus && matchesType && matchesSection;
+    });
+}
+
+function filterEmployees() {
+    renderEmployees();
+}
+
+function setEmployeeSection(section) {
+    window.employeeSection = section;
+    document.querySelectorAll('.employee-nav-item').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.section === section);
+    });
+    renderEmployees();
+}
+
+function openEmployeeDetail(id) {
+    const emp = employees.find(e => e.id === id);
+    if (!emp) return;
+
+    const status = getEmployeeStatus(emp);
+    const hireDate = emp.hire_date ? new Date(emp.hire_date).toLocaleDateString('es-ES') : 'N/A';
+    const skills = (emp.trainings || []).map(s => `<span class="skill-tag">${getSkillName(s)}</span>`).join('') || '<span class="skill-tag">Sin habilidades</span>';
+    const certifications = (emp.trainings || []).filter(s => /cert|dunkin|alcohol|food-safety/i.test(s)).map(s => `<span class="skill-tag certification-tag">${getSkillName(s)}</span>`).join('') || '<span class="text-muted">Sin certificaciones</span>';
+    const serviceSales = (emp.trainings || []).filter(s => /customer|service|retail|souvenirs|pos|cash/i.test(s)).map(s => `<span class="skill-tag">${getSkillName(s)}</span>`).join('') || '<span class="text-muted">Sin información</span>';
+    const retail = (emp.trainings || []).filter(s => /retail|souvenirs|store|cash/i.test(s)).map(s => `<span class="skill-tag">${getSkillName(s)}</span>`).join('') || '<span class="text-muted">Sin información</span>';
+
+    document.getElementById('employeeDetailTitle').textContent = emp.name;
+    document.getElementById('employeeDetailBody').innerHTML = `
+        <div class="employee-detail-grid">
+            <div class="detail-card">
+                <h4>Employee Information</h4>
+                <p><strong>Name:</strong> ${emp.name}</p>
+                <p><strong>Age:</strong> ${emp.age}</p>
+                <p><strong>Nationality:</strong> ${emp.nationality}</p>
+                <p><strong>Role:</strong> ${getRoleName(emp.role)}</p>
+                <p><strong>Group:</strong> Grupo ${emp.group || 'N/A'}</p>
+                <p><strong>Hire Date:</strong> ${hireDate}</p>
+                <p><strong>Status:</strong> <span class="status-indicator ${status.class}">${status.text}</span></p>
+                <p><strong>Versatile:</strong> ${isEmployeeVersatile(emp) ? 'Sí' : 'No'}</p>
+            </div>
+
+            <div class="detail-card">
+                <h4>Roles & Skills</h4>
+                <div class="badge-list">${skills}</div>
+            </div>
+
+            <div class="detail-card">
+                <h4>Certifications</h4>
+                <div class="badge-list">${certifications}</div>
+            </div>
+
+            <div class="detail-card">
+                <h4>Service & Sales</h4>
+                <div class="badge-list">${serviceSales}</div>
+            </div>
+
+            <div class="detail-card">
+                <h4>Retail</h4>
+                <div class="badge-list">${retail}</div>
+            </div>
+
+            <div class="detail-card">
+                <h4>Availability</h4>
+                <p><strong>Schedule:</strong> ${emp.availability?.schedule?.startTime || '09:00'} - ${emp.availability?.schedule?.endTime || '18:00'}</p>
+                <p><strong>On Break:</strong> ${emp.availability?.isOnBreak ? 'Yes' : 'No'}</p>
+                <p><strong>On Training:</strong> ${emp.availability?.isOnTraining ? 'Yes' : 'No'}</p>
+                <p><strong>Day Off:</strong> ${emp.availability?.isDayOff ? 'Yes' : 'No'}</p>
+                <p><strong>Holiday:</strong> ${emp.availability?.isHoliday ? 'Yes' : 'No'}</p>
+            </div>
+        </div>
+    `;
+    document.getElementById('employeeDetailModal').style.display = 'block';
+}
+
+function closeEmployeeDetail() {
+    document.getElementById('employeeDetailModal').style.display = 'none';
+}
+
 function renderEmployees() {
     const container = document.getElementById('employeesList');
     const countBadge = document.getElementById('employeeCountBadge');
     if (!container) return;
 
-    // Update count badge
+    const filtered = getFilteredEmployees();
+
     if (countBadge) {
-        countBadge.textContent = `${employees.length} empleado${employees.length !== 1 ? 's' : ''}`;
+        countBadge.textContent = `${filtered.length} empleado${filtered.length !== 1 ? 's' : ''}`;
     }
 
-    if (!employees || employees.length === 0) {
+    if (!filtered || filtered.length === 0) {
         container.innerHTML = '<p style="text-align:center;color:#6b7280;">No hay empleados. Haz clic en "Nuevo Empleado".</p>';
         return;
     }
 
     let html = '';
-    employees.forEach(emp => {
+    filtered.forEach(emp => {
         const status = getEmployeeStatus(emp);
         const hireDate = emp.hire_date ? new Date(emp.hire_date).toLocaleDateString('es-ES') : 'N/A';
         html += `
-            <div class="employee-card ${status.class}">
-                <div class="employee-info">
-                    <div class="employee-name">
-                        ${emp.name}
-                        <span class="group-badge">Grupo ${emp.group || 'N/A'}</span>
+            <tr class="employee-row">
+                <td>
+                    <div class="employee-cell-main">
+                        <strong>${emp.name}</strong>
+                        <small>${emp.nationality} • ${emp.age} años</small>
                     </div>
-                    <div class="employee-details">
-                        ${getRoleName(emp.role)} • ${emp.age} años • ${emp.nationality}
-                        ${isEmployeeVersatile(emp) ? '<span class="versatile-badge">🌟 Versátil</span>' : ''}
+                </td>
+                <td><span class="skill-tag">${getRoleName(emp.role)}</span></td>
+                <td><span class="skill-tag">${emp.group ? 'Grupo ' + emp.group : 'N/A'}</span></td>
+                <td><span class="skill-tag">${isEmployeeVersatile(emp) ? 'Versátil' : 'Base'}</span></td>
+                <td>
+                    <div class="table-badge-list">
+                        ${(emp.trainings || []).slice(0, 3).map(s => `<span class="skill-tag">${getSkillName(s)}</span>`).join('')}
+                        ${(emp.trainings || []).length > 3 ? `<span class="skill-tag">+${(emp.trainings || []).length - 3}</span>` : ''}
                     </div>
-                    <div class="employee-details" style="font-size:0.85rem;color:#6b7280;">
-                        📅 Ingreso: ${hireDate}
+                </td>
+                <td><span class="status-indicator ${status.class}">${status.text}</span></td>
+                <td>
+                    <div class="employee-table-actions">
+                        <button class="btn btn-sm btn-secondary" onclick="openEmployeeDetail(${emp.id})" title="View"><i class="fas fa-eye"></i></button>
+                        <button class="btn btn-sm btn-secondary" onclick="editEmployee(${emp.id})" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-sm btn-info" onclick="toggleEmployeeStatus(${emp.id})" title="Status"><i class="fas fa-clock"></i></button>
+                        <button class="btn btn-sm btn-danger" onclick="handleDeleteEmployee(${emp.id})" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
-                    <div class="employee-status">
-                        <span class="status-indicator ${status.class}">${status.text}</span>
-                        <span class="schedule-info">${emp.availability?.schedule?.startTime || '09:00'} - ${emp.availability?.schedule?.endTime || '18:00'}</span>
-                    </div>
-                    <div class="employee-skills">
-                        ${emp.trainings && emp.trainings.length > 0 ?
-                            emp.trainings.slice(0,3).map(s => `<span class="skill-tag">${getSkillName(s)}</span>`).join('') :
-                            '<span class="skill-tag">Sin habilidades</span>'
-                        }
-                        ${emp.trainings && emp.trainings.length > 3 ? `<span class="skill-tag">+${emp.trainings.length-3}</span>` : ''}
-                    </div>
-                </div>
-                <div class="employee-actions">
-                    <button class="btn btn-sm btn-secondary" onclick="editEmployee(${emp.id})"><i class="fas fa-edit"></i></button>
-                    <button class="btn btn-sm btn-danger" onclick="handleDeleteEmployee(${emp.id})"><i class="fas fa-trash"></i></button>
-                    <button class="btn btn-sm btn-info" onclick="toggleEmployeeStatus(${emp.id})"><i class="fas fa-clock"></i></button>
-                </div>
-            </div>
+                </td>
+            </tr>
         `;
     });
-    container.innerHTML = html;
+
+    container.innerHTML = `
+        <div class="employee-table-wrapper">
+            <table class="employee-admin-table">
+                <thead>
+                    <tr>
+                        <th>Employee</th>
+                        <th>Role</th>
+                        <th>Group</th>
+                        <th>Versatile</th>
+                        <th>Skills</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>${html}</tbody>
+            </table>
+        </div>
+    `;
+
     updateStats();
 }
 
@@ -685,6 +872,26 @@ function renderLocationCards() {
 // ============================================
 // RENDER: LOCATIONS GRID (para asignación)
 // ============================================
+function getBreakDisplayForAssignment(assignmentId) {
+    const breakRecord = (currentBreaks || []).find(b => b.assignment_id === assignmentId);
+    const noBreakLabel = currentLang === 'en' ? 'No break' : 'Sin break';
+    const coveredLabel = currentLang === 'en' ? 'Covered by' : 'Cubierto por';
+    const selfBreakLabel = currentLang === 'en' ? 'Self Break' : 'Self Break';
+    if (!breakRecord) {
+        return `<span class="skill-tag">${noBreakLabel}</span>`;
+    }
+
+    const start = breakRecord.break_start_time || '--:--';
+    const end = breakRecord.break_end_time || '--:--';
+
+    if (breakRecord.break_type === 'covered' && breakRecord.covered_by_employee_id) {
+        const coveringEmp = employees.find(e => e.id === breakRecord.covered_by_employee_id);
+        return `<span class="skill-tag">☕ ${coveredLabel} ${coveringEmp ? coveringEmp.name : '#' + breakRecord.covered_by_employee_id}</span> <span class="skill-tag">${start}-${end}</span>`;
+    }
+
+    return `<span class="skill-tag">☕ ${selfBreakLabel}</span> <span class="skill-tag">${start}-${end}</span>`;
+}
+
 function renderLocationsGrid() {
     const container = document.getElementById('locationsGrid');
     if (!container) {
@@ -692,14 +899,20 @@ function renderLocationsGrid() {
         return;
     }
 
+    const workDate = document.getElementById('workDate');
+    const currentDate = workDate ? workDate.value : getCurrentDateInTimezone();
+
     let html = '';
     locations.forEach(loc => {
         const assigned = currentAssignments.filter(a => a.locationId === loc.id);
-
         const assignedEmps = assigned.map(a => employees.find(e => e.id === a.employeeId)).filter(e => e);
 
+        // Check if location is disabled for current date
+        const isDisabled = currentLocationDisables.some(d => d.location_id === loc.id);
+        const disableInfo = currentLocationDisables.find(d => d.location_id === loc.id);
+
         html += `
-            <div class="location-card">
+            <div class="location-card ${isDisabled ? 'disabled' : ''}" data-location-id="${loc.id}">
                 <div class="location-name">${loc.name}</div>
                 <div class="location-type">${loc.type === 'food-beverage' ? '🍽️' : '🛍️'} ${loc.type === 'food-beverage' ? 'Comida' : 'Tienda'}</div>
                 <div class="location-category">${loc.category}</div>
@@ -707,23 +920,25 @@ function renderLocationsGrid() {
                     ${loc.requiredRoles.map(r => `<span class="skill-tag">${getRoleName(r)}</span>`).join('')}
                 </div>
                 ${loc.servesAlcohol ? '<span class="skill-tag" style="background:#ef4444;">🍺 Alcohol</span>' : ''}
-                <div style="margin-top:0.5rem;font-size:0.85rem;color:var(--text-light);">
+                ${isDisabled ? `<div class="location-disabled-message">CERRADA POR EL DÍA DE HOY</div>` : ''}
+                <div class="location-assignments" data-location-id="${loc.id}">
                     ${assignedEmps.length > 0 ?
                         assigned.map(a => {
                             const emp = employees.find(e => e.id === a.employeeId);
                             if (!emp) return '';
                             return `
-                                <div style="display:flex;justify-content:space-between;align-items:center;padding:0.25rem 0;border-bottom:1px solid #f1f5f9;">
+                                <div class="assignment-row" data-assignment-id="${a.id}">
                                     <span>👤 ${emp.name} (${getRoleName(emp.role)})</span>
-                                    <span style="font-size:0.75rem;color:#6b7280;">${a.startTime ? a.startTime + '-' + a.endTime : ''}</span>
+                                    <span class="assignment-time">${a.startTime ? a.startTime + '-' + a.endTime : ''}</span>
+                                    <span class="assignment-break">${getBreakDisplayForAssignment(a.id)}</span>
                                     <button class="btn btn-sm btn-danger" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="removeAssignment('${loc.id}', ${a.employeeId})">✕</button>
                                 </div>
                             `;
                         }).join('') :
-                        'Sin asignar'}
+                        '<span class="no-assignments">Sin asignar</span>'}
                 </div>
                 <div style="margin-top:0.5rem;">
-                    <div class="assignee-slot" onclick="assignEmployee('${loc.id}')">
+                    <div class="assignee-slot ${isDisabled ? 'disabled' : ''}" onclick="${isDisabled ? '' : `assignEmployee('${loc.id}')`}">
                         <i class="fas fa-plus"></i>
                     </div>
                 </div>
@@ -732,6 +947,40 @@ function renderLocationsGrid() {
     });
     container.innerHTML = html;
     updateStats();
+}
+
+// Optimized: Update only a single location's assignments
+function updateLocationAssignments(locationId) {
+    const container = document.querySelector(`.location-assignments[data-location-id="${locationId}"]`);
+    if (!container) return;
+
+    const assigned = currentAssignments.filter(a => a.locationId === locationId);
+    const assignedEmps = assigned.map(a => employees.find(e => e.id === a.employeeId)).filter(e => e);
+
+    container.innerHTML = assignedEmps.length > 0 ?
+        assigned.map(a => {
+            const emp = employees.find(e => e.id === a.employeeId);
+            if (!emp) return '';
+            // Escape location ID and employee name for JavaScript
+            const escapedLocationId = locationId.replace(/'/g, "\\'");
+            const escapedEmpName = emp.name.replace(/'/g, "\\'");
+            return `
+                <div class="assignment-row" data-assignment-id="${a.id}">
+                    <span>👤 ${emp.name} (${getRoleName(emp.role)})</span>
+                    <span class="assignment-time">${a.startTime ? a.startTime + '-' + a.endTime : ''}</span>
+                    <button class="btn btn-sm btn-info" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="openBreakConfigModal(${a.id}, '${escapedLocationId}', ${a.employeeId}, '${escapedEmpName}')">☕ Break</button>
+                    <button class="btn btn-sm btn-danger" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="removeAssignment('${escapedLocationId}', ${a.employeeId})">✕</button>
+                </div>
+            `;
+        }).join('') :
+        '<span class="no-assignments">Sin asignar</span>';
+}
+
+// Optimized: Update all location assignments without rebuilding entire grid
+function updateLocationAssignmentsForAll() {
+    locations.forEach(loc => {
+        updateLocationAssignments(loc.id);
+    });
 }
 
 // ============================================
@@ -765,6 +1014,7 @@ function displayOptimizationResults(assignments) {
                 </div>
                 <div class="assignment-status">
                     <span class="status-indicator ${status.class}">${status.text}</span>
+                    <div style="margin-top:0.5rem;">${getBreakDisplayForAssignment(a.id)}</div>
                 </div>
             </div>
         `;
@@ -845,7 +1095,7 @@ async function handleDeleteEmployee(id) {
         employees = employees.filter(e => e.id !== id);
         currentAssignments = currentAssignments.filter(a => a.employeeId !== id);
         renderEmployees();
-        renderLocationsGrid();
+        updateLocationAssignmentsForAll(); // Optimized: Update only assignments
         populateEmployeeSelects();
         displayOptimizationResults(currentAssignments);
         showNotification('Empleado eliminado', 'success');
@@ -891,8 +1141,7 @@ document.getElementById('employeeForm').addEventListener('submit', async functio
         holidays: []
     };
 
-    const payload = { name, nationality, age, role, group_id: group, hire_date: hireDate || new Date().toISOString().split('T')[0], trainings: uniqueTrainings, availability };
-    console.log('Creating employee with payload:', payload);
+    const payload = { name, nationality, age, role, group_id: group, hire_date: hireDate || getCurrentDateInTimezone(), trainings: uniqueTrainings, availability };
 
     try {
         if (currentEditId) {
@@ -941,7 +1190,7 @@ document.getElementById('employeeForm').addEventListener('submit', async functio
         }
 
         renderEmployees();
-        renderLocationsGrid();
+        updateLocationAssignmentsForAll(); // Update all location assignments efficiently
         populateEmployeeSelects();
         closeEmployeeModal();
     } catch (error) {
@@ -1176,6 +1425,17 @@ function assignEmployee(locationId) {
     const location = locations.find(l => l.id === locationId);
     if (!location) return;
 
+    // Check if location is disabled for current date
+    const workDate = document.getElementById('workDate');
+    const currentDate = workDate ? workDate.value : getCurrentDateInTimezone();
+    const isDisabled = currentLocationDisables.some(d => d.location_id === locationId);
+
+    if (isDisabled) {
+        const disableInfo = currentLocationDisables.find(d => d.location_id === locationId);
+        showNotification(`La locación ${location.name} está cerrada para la fecha ${currentDate}. Motivo: ${disableInfo?.disable_reason || 'No especificado'}`, 'error');
+        return;
+    }
+
     // Get all available employees (not filtering by role anymore)
     const available = employees.filter(emp => isEmployeeAvailable(emp));
 
@@ -1213,10 +1473,16 @@ function assignEmployee(locationId) {
                 ` : ''}
                 
                 <label style="display:block;margin-bottom:0.5rem;font-weight:500;">Agregar empleado:</label>
-                <select id="assignEmpSelect" style="width:100%;padding:10px;border-radius:8px;border:1px solid #e5e7eb;">
-                    <option value="">Seleccionar...</option>
-                    ${available.filter(e => !assignedIds.includes(e.id)).map(e => `<option value="${e.id}">${e.name} - ${getRoleName(e.role)} - Grupo ${e.group}</option>`).join('')}
-                </select>
+                <input type="text" id="assignEmpSearch" placeholder="Buscar empleado por nombre..." style="width:100%;padding:10px;border-radius:8px;border:1px solid #e5e7eb;margin-bottom:0.5rem;" />
+                <div id="assignEmpList" style="max-height:200px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;padding:0.5rem;">
+                    ${available.filter(e => !assignedIds.includes(e.id)).map(e => `
+                        <div class="employee-option" data-employee-id="${e.id}" onclick="selectEmployee(${e.id})" style="padding:0.5rem;cursor:pointer;border-bottom:1px solid #f3f4f6;">
+                            <div style="font-weight:500;">${e.name}</div>
+                            <div style="font-size:0.875rem;color:#6b7280;">${getRoleName(e.role)} - Grupo ${e.group}</div>
+                        </div>
+                    `).join('')}
+                </div>
+                <input type="hidden" id="assignEmpSelect" value="" />
                 
                 <div style="margin-top:1rem;">
                     <label style="display:block;margin-bottom:0.5rem;font-weight:500;">Horario de trabajo:</label>
@@ -1240,6 +1506,49 @@ function assignEmployee(locationId) {
         </div>
     `;
     document.body.appendChild(modal);
+
+    // Setup search functionality
+    const searchInput = document.getElementById('assignEmpSearch');
+    const empList = document.getElementById('assignEmpList');
+    const availableEmployees = available.filter(e => !assignedIds.includes(e.id));
+
+    searchInput.addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase();
+        const filtered = availableEmployees.filter(emp =>
+            emp.name.toLowerCase().includes(searchTerm)
+        );
+
+        if (filtered.length === 0) {
+            empList.innerHTML = '<div style="padding:0.5rem;color:#6b7280;text-align:center;">No se encontraron empleados.</div>';
+        } else {
+            empList.innerHTML = filtered.map(e => `
+                <div class="employee-option" data-employee-id="${e.id}" onclick="selectEmployee(${e.id})" style="padding:0.5rem;cursor:pointer;border-bottom:1px solid #f3f4f6;">
+                    <div style="font-weight:500;">${e.name}</div>
+                    <div style="font-size:0.875rem;color:#6b7280;">${getRoleName(e.role)} - Grupo ${e.group}</div>
+                </div>
+            `).join('');
+        }
+    });
+}
+
+function selectEmployee(employeeId) {
+    const emp = employees.find(e => e.id === employeeId);
+    if (!emp) return;
+
+    // Update hidden input
+    document.getElementById('assignEmpSelect').value = employeeId;
+
+    // Highlight selected employee
+    document.querySelectorAll('.employee-option').forEach(opt => {
+        opt.style.background = 'transparent';
+    });
+    const selectedOption = document.querySelector(`.employee-option[data-employee-id="${employeeId}"]`);
+    if (selectedOption) {
+        selectedOption.style.background = '#e0f2fe';
+    }
+
+    // Update search input to show selected employee
+    document.getElementById('assignEmpSearch').value = emp.name;
 }
 
 async function confirmAssignment(locationId) {
@@ -1256,7 +1565,7 @@ async function confirmAssignment(locationId) {
 
     const startTime = startTimeInput.value;
     const endTime = endTimeInput.value;
-    const workDate = workDateInput ? workDateInput.value : new Date().toISOString().split('T')[0];
+    const workDate = workDateInput ? workDateInput.value : getCurrentDateInTimezone();
 
     if (!startTime || !endTime) {
         showNotification('Selecciona el horario de trabajo', 'error');
@@ -1321,7 +1630,6 @@ async function confirmAssignment(locationId) {
             start_time: startTime,
             end_time: endTime
         });
-        console.log('Assignment created successfully:', assignment);
         currentAssignments.push({
             locationId: loc.id,
             locationName: loc.name,
@@ -1332,7 +1640,7 @@ async function confirmAssignment(locationId) {
             endTime: endTime
         });
         document.querySelector('.modal').remove();
-        renderLocationsGrid();
+        updateLocationAssignments(loc.id); // Update only this location
         displayOptimizationResults(currentAssignments);
         showNotification(`${emp.name} asignado a ${loc.name}`, 'success');
     } catch (error) {
@@ -1348,6 +1656,45 @@ async function confirmAssignment(locationId) {
     }
 }
 
+async function clearAssignmentsForDate() {
+    const workDateInput = document.getElementById('workDate');
+    const date = workDateInput ? workDateInput.value : getCurrentDateInTimezone();
+
+    const assignmentsForDate = currentAssignments.filter(a => {
+        const assignmentDate = a.workDate ? a.workDate.split('T')[0] : '';
+        return assignmentDate === date;
+    });
+
+    if (!assignmentsForDate || assignmentsForDate.length === 0) {
+        showNotification('No hay asignaciones para esa fecha', 'info');
+        return;
+    }
+
+    if (!confirm(`¿Eliminar todas las asignaciones del ${date}? Esta acción no se puede deshacer.`)) {
+        return;
+    }
+
+    try {
+        for (const assignment of assignmentsForDate) {
+            if (assignment && assignment.id) {
+                await deleteAssignment(assignment.id);
+            }
+        }
+
+        currentAssignments = currentAssignments.filter(a => {
+            const assignmentDate = a.workDate ? a.workDate.split('T')[0] : '';
+            return assignmentDate !== date;
+        });
+
+        updateLocationAssignmentsForAll();
+        displayOptimizationResults(currentAssignments);
+        showNotification('Asignaciones del día eliminadas', 'success');
+    } catch (error) {
+        console.error('Error clearing assignments:', error);
+        showNotification('Error al eliminar asignaciones del día', 'error');
+    }
+}
+
 async function removeAssignment(locationId, employeeId) {
     try {
         // Find assignment ID first
@@ -1356,7 +1703,7 @@ async function removeAssignment(locationId, employeeId) {
             await deleteAssignment(assignment.id);
         }
         currentAssignments = currentAssignments.filter(a => !(a.locationId === locationId && a.employeeId === employeeId));
-        renderLocationsGrid();
+        updateLocationAssignments(locationId); // Update only this location
         displayOptimizationResults(currentAssignments);
         showNotification('Asignación eliminada', 'success');
     } catch (error) {
@@ -1585,32 +1932,116 @@ function optimizeAssignment() {
 // ============================================
 // QUERY
 // ============================================
-function processQuery() {
-    const query = document.getElementById('queryInput').value.toLowerCase();
-    const results = employees.filter(emp => {
-        return emp.name.toLowerCase().includes(query) ||
-               emp.role.toLowerCase().includes(query) ||
-               (emp.trainings || []).some(t => t.toLowerCase().includes(query));
-    });
+function normalizeQuery(text) {
+    return (text || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
 
+function findBreakInfoForAssignment(assignmentId) {
+    const breakRecord = (currentBreaks || []).find(b => b.assignment_id === assignmentId);
+    const noBreakLabel = currentLang === 'en' ? 'No break' : 'Sin break';
+    if (!breakRecord) return noBreakLabel;
+    const coveredLabel = currentLang === 'en' ? 'Covered by' : 'Cubierto por';
+    const selfBreakLabel = currentLang === 'en' ? 'Self Break' : 'Self Break';
+    if (breakRecord.break_type === 'covered' && breakRecord.covered_by_employee_id) {
+        const covered = employees.find(e => e.id === breakRecord.covered_by_employee_id);
+        return `${coveredLabel} ${covered ? covered.name : '#' + breakRecord.covered_by_employee_id}, ${breakRecord.break_start_time || '--:--'} - ${breakRecord.break_end_time || '--:--'}`;
+    }
+    return `${selfBreakLabel}, ${breakRecord.break_start_time || '--:--'} - ${breakRecord.break_end_time || '--:--'}`;
+}
+
+function processQuery() {
+    const input = document.getElementById('queryInput')?.value || '';
+    const query = normalizeQuery(input);
     const container = document.getElementById('queryResults');
     if (!container) return;
 
-    if (results.length === 0) {
-        container.innerHTML = '<p style="text-align:center;color:#6b7280;">No se encontraron resultados.</p>';
+    if (!query) {
+        container.innerHTML = `<p style="text-align:center;color:#6b7280;">${currentLang === 'en' ? 'Type a location, name, or role.' : 'Escribe una locación, nombre o rol.'}</p>`;
         return;
     }
 
-    let html = '<h4>Resultados:</h4>';
-    results.forEach(emp => {
-        html += `
-            <div style="padding:1rem;background:#f9fafb;border-radius:8px;margin-bottom:0.5rem;">
-                <strong>${emp.name}</strong> - ${getRoleName(emp.role)} - Grupo ${emp.group}<br>
-                Habilidades: ${(emp.trainings || []).map(t => getSkillName(t)).join(', ')}
-            </div>
-        `;
-    });
-    container.innerHTML = html;
+    // 1. Búsqueda por locación
+    const matchedLocations = locations.filter(loc =>
+        normalizeQuery(loc.name).includes(query) || normalizeQuery(loc.id).includes(query)
+    );
+
+    if (matchedLocations.length > 0) {
+        let html = '';
+        matchedLocations.forEach(loc => {
+            const assignments = currentAssignments.filter(a => a.locationId === loc.id);
+            html += `<h4>📍 ${loc.name}</h4>`;
+
+            if (assignments.length === 0) {
+                html += `<p style="color:#6b7280;">${currentLang === 'en' ? 'No employees assigned on the selected date.' : 'No hay empleados asignados en la fecha seleccionada.'}</p>`;
+                return;
+            }
+
+            html += `<div style="display:grid;gap:0.5rem;">`;
+            assignments.forEach(a => {
+                const emp = employees.find(e => e.id === a.employeeId);
+                if (!emp) return;
+                const status = getEmployeeStatus(emp);
+                html += `
+                    <div style="padding:0.75rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">
+                        <strong>${emp.name}</strong> - ${getRoleName(a.employeeRole || emp.role)} - ${currentLang === 'en' ? 'Group' : 'Grupo'} ${emp.group || 'N/A'}<br>
+                        <small>${currentLang === 'en' ? 'Schedule' : 'Horario'}: ${a.startTime || 'N/A'} - ${a.endTime || 'N/A'}</small><br>
+                        <small>${currentLang === 'en' ? 'Status' : 'Estado'}: ${status.text}</small><br>
+                        <small>${currentLang === 'en' ? 'Break' : 'Break'}: ${findBreakInfoForAssignment(a.id)}</small>
+                    </div>
+                `;
+            });
+            html += `</div>`;
+        });
+        container.innerHTML = html;
+        return;
+    }
+
+    // 2. Búsqueda por nombre de empleado
+    const employeesMatched = employees.filter(emp => normalizeQuery(emp.name).includes(query));
+    if (employeesMatched.length > 0) {
+        let html = `<h4>${currentLang === 'en' ? 'Results by employee:' : 'Resultados por empleado:'}</h4>`;
+        employeesMatched.forEach(emp => {
+            const assignment = currentAssignments.find(a => a.employeeId === emp.id);
+            html += `
+                <div style="padding:0.75rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:0.5rem;">
+                    <strong>${emp.name}</strong><br>
+                    Rol: ${getRoleName(emp.role)}<br>
+                    ${currentLang === 'en' ? 'Group' : 'Grupo'}: ${emp.group || 'N/A'}<br>
+                    ${currentLang === 'en' ? 'Status' : 'Estado'}: ${getEmployeeStatus(emp).text}<br>
+                    ${assignment ? `${currentLang === 'en' ? 'Location' : 'Locación'}: ${assignment.locationName}<br>${currentLang === 'en' ? 'Schedule' : 'Horario'}: ${assignment.startTime || 'N/A'} - ${assignment.endTime || 'N/A'}<br>${currentLang === 'en' ? 'Break' : 'Break'}: ${findBreakInfoForAssignment(assignment.id)}` : `${currentLang === 'en' ? 'Not assigned for this date.' : 'No asignado para esta fecha.'}`}
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+        return;
+    }
+
+    // 3. Búsqueda por rol
+    const roleMatched = employees.filter(emp => normalizeQuery(getRoleName(emp.role)).includes(query) || normalizeQuery(emp.role).includes(query));
+    if (roleMatched.length > 0) {
+        let html = `<h4>${currentLang === 'en' ? 'Results by role:' : 'Resultados por rol:'}</h4>`;
+        roleMatched.forEach(emp => {
+            const assignment = currentAssignments.find(a => a.employeeId === emp.id);
+            const status = getEmployeeStatus(emp);
+            html += `
+                <div style="padding:0.75rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:0.5rem;">
+                    <strong>${emp.name}</strong> - ${getRoleName(emp.role)}<br>
+                    ${currentLang === 'en' ? 'Group' : 'Grupo'}: ${emp.group || 'N/A'}<br>
+                    ${currentLang === 'en' ? 'Status' : 'Estado'}: ${status.text}<br>
+                    ${assignment ? `${currentLang === 'en' ? 'Assigned to' : 'Asignado a'}: ${assignment.locationName}<br>${currentLang === 'en' ? 'Schedule' : 'Horario'}: ${assignment.startTime || 'N/A'} - ${assignment.endTime || 'N/A'}<br>${currentLang === 'en' ? 'Break' : 'Break'}: ${findBreakInfoForAssignment(assignment.id)}` : `${currentLang === 'en' ? 'Not assigned for this date.' : 'Sin asignación para esta fecha.'}`}
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+        return;
+    }
+
+    container.innerHTML = `<p style="text-align:center;color:#6b7280;">${currentLang === 'en' ? 'No results found.' : 'No se encontraron resultados.'}</p>`;
 }
 
 function switchQueryTab(tab) {
@@ -1639,8 +2070,8 @@ async function queryByLocation() {
     if (!location) return;
 
     try {
-        // Get assignments for this location
-        const assignments = await fetchAssignments();
+        // Get assignments for this location for the active date
+        const assignments = currentAssignments || [];
 
         // Count assignments per employee
         const employeeStats = {};
@@ -1708,7 +2139,7 @@ function quickQuery(term) {
 function scrollToTasks() {
     // Close admin panel if open
     document.getElementById('adminLocationsSection').style.display = 'none';
-    document.getElementById('adminStaffingSection').style.display = 'none';
+    document.getElementById('adminClosureHistorySection').style.display = 'none';
 
     const tasksSection = document.getElementById('tasks-section');
     if (tasksSection) {
@@ -2109,25 +2540,79 @@ function printAssignmentHistory() {
 }
 
 // ============================================
+// LOCATION DISABLE CHECK
+// ============================================
+async function checkLocationDisabled(locationId, date) {
+    try {
+        const disables = await fetchLocationDisables(date);
+        const isDisabled = disables.some(d => d.location_id === locationId && !d.enabled_at);
+        return isDisabled;
+    } catch (error) {
+        console.error('Error checking location disabled status:', error);
+        return false;
+    }
+}
+
+// ============================================
 // LOCATION MANAGEMENT
 // ============================================
-function renderManagementGrid() {
+async function renderManagementGrid() {
+    console.log('renderManagementGrid called');
     const container = document.getElementById('managementGrid');
-    if (!container) return;
+    if (!container) {
+        console.error('managementGrid container not found');
+        return;
+    }
+
+    const managementDate = document.getElementById('managementDate');
+    const currentDate = managementDate ? managementDate.value : getCurrentDateInTimezone();
+    console.log('Management date:', currentDate);
+
+    // Fetch disables for the current management date
+    let disables = [];
+    try {
+        disables = await fetchLocationDisables(currentDate);
+        console.log('Fetched disables:', disables);
+    } catch (error) {
+        console.error('Error fetching location disables:', error);
+    }
 
     let html = '';
     locations.forEach(loc => {
+        const disableRecord = disables.find(d => d.location_id === loc.id && !d.enabled_at);
+        const isDisabled = !!disableRecord;
+
+        let statusText = 'Activo';
+        let statusColor = '#10b981';
+        let disableButtonDisplay = 'inline-block';
+        let enableButtonDisplay = 'none';
+
+        if (isDisabled) {
+            if (disableRecord.reactivation_date) {
+                statusText = `Reactivación: ${formatDate(disableRecord.reactivation_date)}`;
+                statusColor = '#f59e0b';
+            } else {
+                statusText = 'Deshabilitado';
+                statusColor = '#ef4444';
+            }
+            disableButtonDisplay = 'none';
+            enableButtonDisplay = 'inline-block';
+        }
+
+        // Escape single quotes in location name for JavaScript
+        const escapedName = loc.name.replace(/'/g, "\\'");
+
         html += `
             <div class="location-management-card" id="management-${loc.id}">
                 <div class="location-header">
                     <span class="location-name">${loc.name}</span>
-                    <span class="location-status" id="status-${loc.id}">Activo</span>
+                    <span class="location-status" id="status-${loc.id}" style="color: ${statusColor};">${statusText}</span>
                 </div>
                 <div class="location-actions">
-                    <button class="btn btn-sm btn-danger" onclick="openDisableModal('${loc.id}', '${loc.name}')">
+                    <button class="btn btn-sm btn-danger" onclick="openDisableModal('${loc.id}', '${escapedName}')" style="display: ${disableButtonDisplay};">
                         <i class="fas fa-ban"></i> Deshabilitar
                     </button>
-                    <button class="btn btn-sm btn-success" onclick="openEnableModal('${loc.id}', '${loc.name}')" style="display:none;" id="enable-${loc.id}">
+                    <button class="btn btn-sm btn-success" onclick="openEnableModal('${loc.id}', '${escapedName}')" style="display: ${enableButtonDisplay};" id="enable-${loc.id}">
                         <i class="fas fa-check"></i> Habilitar
                     </button>
                 </div>
@@ -2135,12 +2620,21 @@ function renderManagementGrid() {
         `;
     });
 
+    console.log('Generated HTML for', locations.length, 'locations');
     container.innerHTML = html;
+    console.log('HTML set to container');
 }
 
 function openDisableModal(locationId, locationName) {
+    console.log('Opening disable modal for:', locationId, locationName);
+
+    const managementDate = document.getElementById('managementDate');
+    console.log('Management date element:', managementDate);
+    console.log('Management date value:', managementDate ? managementDate.value : 'not found');
+
     const modal = document.createElement('div');
     modal.className = 'modal';
+    modal.style.display = 'block';
     modal.innerHTML = `
         <div class="modal-content">
             <div class="modal-header">
@@ -2150,7 +2644,7 @@ function openDisableModal(locationId, locationName) {
             <form id="disableForm">
                 <div class="form-group">
                     <label>Fecha de deshabilitación</label>
-                    <input type="date" id="disableDate" value="${document.getElementById('managementDate').value}" required />
+                    <input type="date" id="disableDate" value="${managementDate ? managementDate.value : getCurrentDateInTimezone()}" required />
                 </div>
                 <div class="form-group">
                     <label>Fecha de reactivación automática (opcional)</label>
@@ -2172,16 +2666,23 @@ function openDisableModal(locationId, locationName) {
             </form>
         </div>
     `;
+
+    console.log('Modal created:', modal);
     document.body.appendChild(modal);
+    console.log('Modal appended to body');
 
     document.getElementById('disableForm').addEventListener('submit', async (e) => {
         e.preventDefault();
+        console.log('Disable form submitted');
         const disableDate = document.getElementById('disableDate').value;
         const reactivationDate = document.getElementById('reactivationDate').value;
         const disableReason = document.getElementById('disableReason').value;
         const disabledBy = document.getElementById('disabledBy').value;
 
+        console.log('Disable data:', { locationId, disableDate, reactivationDate, disableReason, disabledBy });
+
         try {
+            console.log('Calling disableLocation API...');
             await disableLocation({
                 location_id: locationId,
                 disable_date: disableDate,
@@ -2190,19 +2691,24 @@ function openDisableModal(locationId, locationName) {
                 reactivation_date: reactivationDate || null
             });
 
+            console.log('Disable successful');
             showNotification(`${locationName} deshabilitado correctamente${reactivationDate ? ' (reactivación programada)' : ''}`, 'success');
             modal.remove();
             updateLocationStatus(locationId, 'disabled', reactivationDate);
+            refreshClosureHistoryPanel();
         } catch (error) {
             console.error('Error disabling location:', error);
-            showNotification('Error al deshabilitar locación', 'error');
+            showNotification('Error al deshabilitar locación: ' + error.message, 'error');
         }
     });
 }
 
 function openEnableModal(locationId, locationName) {
+    console.log('Opening enable modal for:', locationId, locationName);
+
     const modal = document.createElement('div');
     modal.className = 'modal';
+    modal.style.display = 'block';
     modal.innerHTML = `
         <div class="modal-content">
             <div class="modal-header">
@@ -2229,54 +2735,53 @@ function openEnableModal(locationId, locationName) {
 
     document.getElementById('enableForm').addEventListener('submit', async (e) => {
         e.preventDefault();
+        console.log('Enable form submitted');
         const enableReason = document.getElementById('enableReason').value;
         const enabledBy = document.getElementById('enabledBy').value;
 
         try {
             // Find the disable record for this location and date
             const managementDate = document.getElementById('managementDate').value;
+            console.log('Management date for enable:', managementDate);
             const disables = await fetchLocationDisables(managementDate);
+            console.log('Disables for enable:', disables);
             const disableRecord = disables.find(d => d.location_id === locationId);
+            console.log('Disable record found:', disableRecord);
 
             if (disableRecord) {
+                console.log('Calling enableLocation API...');
                 await enableLocation(disableRecord.id, {
                     enable_reason: enableReason,
                     enabled_by: enabledBy
                 });
 
+                console.log('Enable successful');
                 showNotification(`${locationName} habilitado correctamente`, 'success');
                 modal.remove();
                 updateLocationStatus(locationId, 'enabled');
             } else {
+                console.error('No disable record found');
                 showNotification('No se encontró registro de deshabilitación', 'error');
             }
         } catch (error) {
             console.error('Error enabling location:', error);
-            showNotification('Error al habilitar locación', 'error');
+            showNotification('Error al habilitar locación: ' + error.message, 'error');
         }
     });
 }
 
-function updateLocationStatus(locationId, status, reactivationDate = null) {
-    const statusElement = document.getElementById(`status-${locationId}`);
-    const disableButton = document.querySelector(`#management-${locationId} .btn-danger`);
-    const enableButton = document.getElementById(`enable-${locationId}`);
-
-    if (status === 'disabled') {
-        if (reactivationDate) {
-            statusElement.textContent = `Programado: ${formatDate(reactivationDate)}`;
-            statusElement.style.color = '#f59e0b';
-        } else {
-            statusElement.textContent = 'Deshabilitado';
-            statusElement.style.color = '#ef4444';
-        }
-        disableButton.style.display = 'none';
-        enableButton.style.display = 'inline-block';
-    } else {
-        statusElement.textContent = 'Activo';
-        statusElement.style.color = '#10b981';
-        disableButton.style.display = 'inline-block';
-        enableButton.style.display = 'none';
+async function updateLocationStatus(locationId, status, reactivationDate = null) {
+    // Re-render the management grid to update all statuses and refresh global disable state
+    renderManagementGrid();
+    renderLocationsGrid();
+    const managementDate = document.getElementById('managementDate');
+    const date = managementDate && managementDate.value ? managementDate.value : getCurrentDateInTimezone();
+    try {
+        const disables = await fetchLocationDisables(date);
+        currentLocationDisables = disables.filter(d => !d.enabled_at);
+    } catch (error) {
+        console.error('Error refreshing location disables:', error);
+        currentLocationDisables = [];
     }
 }
 
@@ -2289,25 +2794,27 @@ function initialize() {
     setupNavigation();
 
     const dateInput = document.getElementById('workDate');
-    if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+    if (dateInput) dateInput.value = getCurrentDateInTimezone();
 
     // Initialize history date with today
     const historyDate = document.getElementById('historyDate');
-    if (historyDate) historyDate.value = new Date().toISOString().split('T')[0];
+    if (historyDate) historyDate.value = getCurrentDateInTimezone();
 
     // Initialize management date with today
     const managementDate = document.getElementById('managementDate');
     if (managementDate) {
-        managementDate.value = new Date().toISOString().split('T')[0];
+        managementDate.value = getCurrentDateInTimezone();
         managementDate.addEventListener('change', () => {
             loadAssignmentsForDate(managementDate.value);
+            loadLocationDisablesForManagement(managementDate.value);
+            renderManagementGrid(); // Re-render to reset UI states
         });
     }
 
     // Initialize work date with today
     const workDate = document.getElementById('workDate');
     if (workDate) {
-        workDate.value = new Date().toISOString().split('T')[0];
+        workDate.value = getCurrentDateInTimezone();
         workDate.addEventListener('change', () => {
             loadAssignmentsForDate(workDate.value);
         });
@@ -2323,9 +2830,8 @@ function initialize() {
     // Language Switcher
     document.querySelectorAll('.lang-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            showNotification(`Idioma: ${btn.textContent}`, 'info');
+            const lang = btn.dataset.lang;
+            handleLanguageChange(lang);
         });
     });
 
@@ -2341,14 +2847,220 @@ function initialize() {
 }
 
 // ============================================
+// BREAK CONFIGURATION
+// ============================================
+
+async function openBreakConfigModal(assignmentId, locationId, employeeId, employeeName) {
+    console.log('Opening break config modal for assignment:', assignmentId);
+
+    // Fetch existing break configuration
+    let existingBreak = null;
+    try {
+        const result = await fetchBreakByAssignment(assignmentId);
+        existingBreak = result;
+    } catch (error) {
+        console.error('Error fetching existing break:', error);
+        existingBreak = null;
+    }
+
+    const workDate = document.getElementById('workDate').value;
+    const assignment = currentAssignments.find(a => a.id === assignmentId);
+
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.style.display = 'block';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:600px;">
+            <div class="modal-header">
+                <h3>Configurar Break - ${employeeName}</h3>
+                <span class="close" onclick="this.closest('.modal').remove()">&times;</span>
+            </div>
+            <form id="breakConfigForm">
+                <div class="form-group">
+                    <label>Tipo de Break</label>
+                    <select id="breakType" required onchange="handleBreakTypeChange()">
+                        <option value="">Seleccionar...</option>
+                        <option value="self" ${existingBreak?.break_type === 'self' ? 'selected' : ''}>Self Break</option>
+                        <option value="covered" ${existingBreak?.break_type === 'covered' ? 'selected' : ''}>Cubierto por otro empleado</option>
+                    </select>
+                </div>
+
+                <div id="coveredBySection" style="display:${existingBreak?.break_type === 'covered' ? 'block' : 'none'};">
+                    <div class="form-group">
+                        <label>Empleado que cubre el break</label>
+                        <input type="text" id="coveredBySearch" placeholder="Buscar empleado..." style="width:100%;padding:10px;border-radius:8px;border:1px solid #e5e7eb;margin-bottom:0.5rem;" />
+                        <div id="coveredByList" style="max-height:200px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;padding:0.5rem;">
+                            <p style="color:#6b7280;text-align:center;">Busca un empleado...</p>
+                        </div>
+                        <input type="hidden" id="coveredByEmployeeId" value="${existingBreak?.covered_by_employee_id || ''}" />
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Horario del Break</label>
+                    <div style="display:flex;gap:0.5rem;">
+                        <div style="flex:1;">
+                            <label style="font-size:0.875rem;">Inicio:</label>
+                            <input type="time" id="breakStartTime" value="${existingBreak?.break_start_time || '12:00'}" style="width:100%;padding:8px;border-radius:6px;border:1px solid #e5e7eb;" />
+                        </div>
+                        <div style="flex:1;">
+                            <label style="font-size:0.875rem;">Fin:</label>
+                            <input type="time" id="breakEndTime" value="${existingBreak?.break_end_time || '13:00'}" style="width:100%;padding:8px;border-radius:6px;border:1px solid #e5e7eb;" />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">Cancelar</button>
+                    ${existingBreak && existingBreak.id ? `<button type="button" class="btn btn-danger" onclick="deleteBreakConfig(${existingBreak.id}); this.closest('.modal').remove();">Eliminar</button>` : ''}
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // Handle break type change
+    window.handleBreakTypeChange = function() {
+        const breakType = document.getElementById('breakType').value;
+        const coveredBySection = document.getElementById('coveredBySection');
+        coveredBySection.style.display = breakType === 'covered' ? 'block' : 'none';
+    };
+
+    // Setup search functionality for covered by employee
+    const searchInput = document.getElementById('coveredBySearch');
+    const empList = document.getElementById('coveredByList');
+    const availableEmployees = employees.filter(e => e.id !== employeeId && isEmployeeAvailable(e));
+
+    searchInput.addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase();
+        const filtered = availableEmployees.filter(emp =>
+            emp.name.toLowerCase().includes(searchTerm)
+        );
+
+        if (filtered.length === 0) {
+            empList.innerHTML = '<p style="color:#6b7280;text-align:center;">No se encontraron empleados.</p>';
+        } else {
+            empList.innerHTML = filtered.map(e => {
+                const escapedName = e.name.replace(/'/g, "\\'");
+                return `
+                <div class="employee-option" data-employee-id="${e.id}" onclick="selectCoveringEmployee(${e.id}, '${escapedName}')" style="padding:0.5rem;cursor:pointer;border-bottom:1px solid #f3f4f6;">
+                    <div style="font-weight:500;">${e.name}</div>
+                    <div style="font-size:0.875rem;color:#6b7280;">${getRoleName(e.role)} - Grupo ${e.group}</div>
+                </div>
+            `;
+            }).join('');
+        }
+    });
+
+    // If there's an existing covered employee, show them
+    if (existingBreak && existingBreak.covered_by_employee_id) {
+        const coveredEmp = employees.find(e => e.id === existingBreak.covered_by_employee_id);
+        if (coveredEmp) {
+            const escapedName = coveredEmp.name.replace(/'/g, "\\'");
+            empList.innerHTML = `
+                <div class="employee-option" data-employee-id="${coveredEmp.id}" onclick="selectCoveringEmployee(${coveredEmp.id}, '${escapedName}')" style="padding:0.5rem;cursor:pointer;border-bottom:1px solid #f3f4f6;background:#e0f2fe;">
+                    <div style="font-weight:500;">${coveredEmp.name}</div>
+                    <div style="font-size:0.875rem;color:#6b7280;">${getRoleName(coveredEmp.role)} - Grupo ${coveredEmp.group}</div>
+                </div>
+            `;
+            document.getElementById('coveredBySearch').value = coveredEmp.name;
+        }
+    }
+
+    // Function to select covering employee
+    window.selectCoveringEmployee = function(empId, empName) {
+        document.getElementById('coveredByEmployeeId').value = empId;
+        document.getElementById('coveredBySearch').value = empName;
+        empList.innerHTML = `
+            <div class="employee-option" data-employee-id="${empId}" style="padding:0.5rem;cursor:pointer;border-bottom:1px solid #f3f4f6;background:#e0f2fe;">
+                <div style="font-weight:500;">${empName}</div>
+                <div style="font-size:0.875rem;color:#6b7280;">Seleccionado</div>
+            </div>
+        `;
+    };
+
+    // Handle form submission
+    document.getElementById('breakConfigForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const breakType = document.getElementById('breakType').value;
+        const coveredByEmployeeId = document.getElementById('coveredByEmployeeId').value;
+        const breakStartTime = document.getElementById('breakStartTime').value;
+        const breakEndTime = document.getElementById('breakEndTime').value;
+
+        if (!breakType) {
+            showNotification('Selecciona el tipo de break', 'error');
+            return;
+        }
+
+        if (breakType === 'covered' && !coveredByEmployeeId) {
+            showNotification('Selecciona el empleado que cubrirá el break', 'error');
+            return;
+        }
+
+        try {
+            const breakData = {
+                assignment_id: assignmentId,
+                employee_id: employeeId,
+                work_date: workDate,
+                location_id: locationId,
+                break_type: breakType,
+                break_start_time: breakStartTime,
+                break_end_time: breakEndTime
+            };
+
+            if (breakType === 'covered' && coveredByEmployeeId) {
+                breakData.covered_by_employee_id = parseInt(coveredByEmployeeId);
+            }
+
+            await createBreak(breakData);
+
+            showNotification('Configuración de break guardada', 'success');
+            modal.remove();
+            loadAssignmentsForDate(workDate);
+        } catch (error) {
+            console.error('Error saving break config:', error);
+            // Try to parse error message from backend response
+            let errorMessage = 'Error al guardar configuración de break';
+            if (error.message) {
+                if (error.message.includes('insufficient_staffing_during_break')) {
+                    errorMessage = 'Self Break no permitido: No hay suficientes empleados disponibles durante el horario del break';
+                } else if (error.message.includes('no_alcohol_certification_during_break')) {
+                    errorMessage = 'Self Break no permitido: Ningún empleado disponible tiene certificación de alcohol';
+                } else {
+                    errorMessage = error.message;
+                }
+            }
+            showNotification(errorMessage, 'error');
+        }
+    });
+}
+
+async function deleteBreakConfig(breakId) {
+    try {
+        await deleteBreak(breakId);
+        showNotification('Configuración de break eliminada', 'success');
+        const currentDate = document.getElementById('workDate')?.value || getCurrentDateInTimezone();
+        loadAssignmentsForDate(currentDate);
+    } catch (error) {
+        console.error('Error deleting break config:', error);
+        showNotification('Error al eliminar configuración de break', 'error');
+    }
+}
+
+// ============================================
 // LOAD ASSIGNMENTS BY DATE
 // ============================================
 async function loadAssignmentsForDate(date) {
     try {
+        console.log('Loading assignments for date:', date);
+
         const assignments = await fetchAssignments();
 
         // Normalize dates for comparison (extract just the date part)
         const normalizedDate = date.split('T')[0];
+        console.log('Normalized date:', normalizedDate);
+
         const filtered = assignments.filter(a => {
             const assignmentDate = a.work_date ? a.work_date.split('T')[0] : '';
             return assignmentDate === normalizedDate;
@@ -2367,6 +3079,33 @@ async function loadAssignmentsForDate(date) {
             startTime: a.start_time,
             endTime: a.end_time
         }));
+
+        console.log('Filtered assignments:', currentAssignments.length);
+
+        // Load location disables for this date
+        try {
+            const disables = await fetchLocationDisables(normalizedDate);
+            console.log('Location disables for date:', disables);
+            currentLocationDisables = disables.filter(d => !d.enabled_at);
+            try {
+                currentBreaks = await fetchBreaks(currentDate);
+            } catch (error) {
+                console.error('Error loading breaks:', error);
+                currentBreaks = [];
+            }
+        } catch (error) {
+            console.error('Error loading location disables:', error);
+            currentLocationDisables = [];
+        }
+
+        try {
+            currentBreaks = await fetchBreaks(normalizedDate);
+        } catch (error) {
+            console.error('Error loading breaks:', error);
+            currentBreaks = [];
+        }
+
+        console.log('Current location disables:', currentLocationDisables);
 
         renderLocationsGrid();
         displayOptimizationResults(currentAssignments);
@@ -2388,15 +3127,611 @@ function openAdminPanel() {
 
     // Show admin sections
     document.getElementById('adminLocationsSection').style.display = 'block';
-    document.getElementById('adminStaffingSection').style.display = 'block';
+    document.getElementById('adminClosureHistorySection').style.display = 'block';
 
     console.log('Rendering management grid...');
     renderManagementGrid();
-    console.log('Loading staffing rules...');
-    loadStaffingRules();
+    console.log('Loading closure history...');
+    refreshClosureHistoryPanel();
+
+    // Load location disables for management date
+    const managementDate = document.getElementById('managementDate');
+    if (managementDate && managementDate.value) {
+        loadLocationDisablesForManagement(managementDate.value);
+    }
 
     showNotification('Panel de administración abierto', 'success');
 }
+
+async function loadLocationDisablesForManagement(date) {
+    try {
+        const disables = await fetchLocationDisables(date);
+        // Update the UI to show disabled locations
+        disables.forEach(disable => {
+            const disableRecord = disable;
+            if (!disableRecord.enabled_at) {
+                updateLocationStatus(disableRecord.location_id, 'disabled', disableRecord.reactivation_date);
+            }
+        });
+    } catch (error) {
+        console.error('Error loading location disables for management:', error);
+    }
+}
+
+// ============================================
+// PANEL REFRESH FUNCTIONS
+// ============================================
+
+async function refreshEmployeesPanel() {
+    const btn = document.getElementById('refreshEmployeesBtn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
+    btn.disabled = true;
+
+    try {
+        const apiEmployees = await fetchEmployees();
+        employees = apiEmployees.map(emp => ({
+            ...emp,
+            group: emp.group_id,
+            hire_date: emp.hire_date,
+            trainings: emp.trainings || [],
+            availability: emp.availability || {
+                isOnBreak: false,
+                isOnTraining: false,
+                isDayOff: false,
+                isHoliday: false,
+                schedule: {
+                    startTime: emp.schedule_start_time || '09:00',
+                    endTime: emp.schedule_end_time || '18:00'
+                }
+            }
+        }));
+
+        renderEmployees();
+        populateEmployeeSelects();
+        showNotification('Empleados actualizados', 'success');
+    } catch (error) {
+        console.error('Error refreshing employees panel:', error);
+        showNotification('Error al actualizar empleados', 'error');
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function refreshAssignmentsPanel() {
+    const btn = document.getElementById('refreshAssignmentsBtn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
+    btn.disabled = true;
+
+    try {
+        const workDate = document.getElementById('workDate');
+        const currentDate = workDate ? workDate.value : getCurrentDateInTimezone();
+
+        await loadAssignmentsForDate(currentDate);
+        showNotification('Asignaciones actualizadas', 'success');
+    } catch (error) {
+        console.error('Error refreshing assignments panel:', error);
+        showNotification('Error al actualizar asignaciones', 'error');
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function refreshHistoryPanel() {
+    const btn = document.getElementById('refreshHistoryBtn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
+    btn.disabled = true;
+
+    try {
+        const historyDate = document.getElementById('historyDate');
+        if (historyDate && historyDate.value) {
+            await loadAssignmentHistory();
+            showNotification('Historial actualizado', 'success');
+        } else {
+            showNotification('Selecciona una fecha primero', 'info');
+        }
+    } catch (error) {
+        console.error('Error refreshing history panel:', error);
+        showNotification('Error al actualizar historial', 'error');
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function refreshLocationManagementPanel() {
+    const btn = document.getElementById('refreshLocationManagementBtn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
+    btn.disabled = true;
+
+    try {
+        await renderManagementGrid();
+        const managementDate = document.getElementById('managementDate');
+        if (managementDate && managementDate.value) {
+            await loadLocationDisablesForManagement(managementDate.value);
+        }
+        showNotification('Gestión de locaciones actualizada', 'success');
+    } catch (error) {
+        console.error('Error refreshing location management panel:', error);
+        showNotification('Error al actualizar gestión de locaciones', 'error');
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function refreshStaffingRulesPanel() {
+    const btn = document.getElementById('refreshStaffingRulesBtn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
+    btn.disabled = true;
+
+    try {
+        // Reuse existing loadStaffingRules function
+        await loadStaffingRules();
+        showNotification('Reglas de staffing actualizadas', 'success');
+    } catch (error) {
+        console.error('Error refreshing staffing rules panel:', error);
+        showNotification('Error al actualizar reglas de staffing', 'error');
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function refreshTasksPanel() {
+    const btn = document.getElementById('refreshTasksBtn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
+    btn.disabled = true;
+
+    try {
+        tasks = await fetchTasks();
+        filterTasks();
+        showNotification('Tareas actualizadas', 'success');
+    } catch (error) {
+        console.error('Error refreshing tasks panel:', error);
+        showNotification('Error al actualizar tareas', 'error');
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+let closureHistoryRecords = [];
+
+async function refreshClosureHistoryPanel() {
+    const btn = document.getElementById('refreshClosureHistoryBtn');
+    const originalText = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
+        btn.disabled = true;
+    }
+
+    try {
+        closureHistoryRecords = await fetchLocationDisables();
+        renderClosureHistory();
+        if (btn) showNotification('Registro de locaciones cerradas actualizado', 'success');
+    } catch (error) {
+        console.error('Error refreshing closure history:', error);
+        showNotification('Error al actualizar registro de locaciones cerradas', 'error');
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+}
+
+function filterClosureHistory() {
+    renderClosureHistory();
+}
+
+function renderClosureHistory() {
+    const container = document.getElementById('closureHistoryContainer');
+    const dateFilter = document.getElementById('closureHistoryDate')?.value || '';
+    const locationFilter = document.getElementById('closureHistoryLocation')?.value || '';
+    const userFilter = (document.getElementById('closureHistoryUser')?.value || '').toLowerCase().trim();
+
+    if (!container) return;
+
+    // Populate location dropdown if empty or changed
+    const locationSelect = document.getElementById('closureHistoryLocation');
+    if (locationSelect && locationSelect.options.length === 1) {
+        const uniqueLocations = [...new Set((closureHistoryRecords || []).map(r => r.location_id))];
+        uniqueLocations.forEach(locId => {
+            const loc = locations.find(l => l.id === locId);
+            const option = document.createElement('option');
+            option.value = locId;
+            option.textContent = loc ? loc.name : locId;
+            locationSelect.appendChild(option);
+        });
+    }
+
+    const filtered = (closureHistoryRecords || []).filter(record => {
+        const matchesDate = !dateFilter || record.disable_date === dateFilter || record.disable_date?.startsWith(dateFilter);
+        const matchesLocation = !locationFilter || record.location_id === locationFilter;
+        const matchesUser = !userFilter || (record.disabled_by || '').toLowerCase().includes(userFilter);
+        return matchesDate && matchesLocation && matchesUser;
+    }).sort((a, b) => {
+        const dateA = new Date(`${a.disable_date} ${a.created_at || ''}`).getTime();
+        const dateB = new Date(`${b.disable_date} ${b.created_at || ''}`).getTime();
+        return dateB - dateA;
+    });
+
+    if (!filtered || filtered.length === 0) {
+        container.innerHTML = '<p style="text-align:center;color:#6b7280;">No hay registros que coincidan con los filtros.</p>';
+        return;
+    }
+
+    container.innerHTML = `
+        <table class="employee-admin-table" style="width:100%;min-width:700px;">
+            <thead>
+                <tr>
+                    <th>Locación</th>
+                    <th>Fecha</th>
+                    <th>Hora</th>
+                    <th>Motivo</th>
+                    <th>Cerrado por</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${filtered.map(record => {
+                    const location = locations.find(l => l.id === record.location_id);
+                    const time = record.created_at ? new Date(record.created_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : 'N/A';
+                    return `
+                        <tr>
+                            <td>${location ? location.name : record.location_id}</td>
+                            <td>${record.disable_date ? formatDateInTimezone(record.disable_date) : 'N/A'}</td>
+                            <td>${time}</td>
+                            <td>${record.disable_reason || 'N/A'}</td>
+                            <td>${record.disabled_by || 'N/A'}</td>
+                        </tr>
+                    `;
+                }).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+// ============================================
+// TIMEZONE HELPER FUNCTIONS
+// ============================================
+const TIMEZONE = 'America/Santo_Domingo';
+
+function getCurrentDateInTimezone() {
+    const now = new Date();
+    const dateInTimezone = new Date(now.toLocaleString('en-US', { timeZone: TIMEZONE }));
+    return dateInTimezone.toISOString().split('T')[0];
+}
+
+function formatDateInTimezone(dateString) {
+    const date = new Date(dateString);
+    const dateInTimezone = new Date(date.toLocaleString('en-US', { timeZone: TIMEZONE }));
+    return dateInTimezone.toISOString().split('T')[0];
+}
+
+// ============================================
+// LANGUAGE SYSTEM
+// ============================================
+const translations = {
+    es: {},
+    en: {
+        'Inicio': 'Home',
+        'Gestión': 'Management',
+        'Tareas': 'Tasks',
+        'Admin': 'Admin',
+        'Wastelog': 'Wastelog',
+        'Administra empleados, asigna personal a locaciones y gestiona tareas': 'Manage employees, assign staff to locations, and manage tasks',
+        'Gestión de Personal para': 'Staff Management for',
+        'Ir al Demo': 'Go to Demo',
+        'Ver Locaciones': 'View Locations',
+        'Empleados': 'Employees',
+        'Locaciones': 'Locations',
+        'Tareas Activas': 'Active Tasks',
+        'Locaciones de Comida y Tiendas': 'Food & Beverage and Retail Locations',
+        'StoryLand ofrece múltiples opciones para comer y comprar souvenirs dentro del parque': 'StoryLand offers multiple dining and souvenir shopping options throughout the park',
+        'Panel de Gestión': 'Management Panel',
+        'Exportar a Excel': 'Export to Excel',
+        'Borrar Datos': 'Clear Data',
+        'Employee Management': 'Employee Management',
+        'Employees': 'Employees',
+        'Skills': 'Skills',
+        'Certifications': 'Certifications',
+        'Availability': 'Availability',
+        'Service & Sales': 'Service & Sales',
+        'Retail': 'Retail',
+        'History': 'History',
+        'Employee Management / Employees': 'Employee Management / Employees',
+        'Nuevo Empleado': 'New Employee',
+        'Actualizar': 'Refresh',
+        'Buscar empleados...': 'Search employees...',
+        'Todos los roles': 'All roles',
+        'Todos los estados': 'All statuses',
+        'Todos los departamentos': 'All departments',
+        'Seleccionar Día:': 'Select Day:',
+        'Locaciones del Parque (Asignación Operativa)': 'Park Locations (Operational Assignment)',
+        'Un empleado no puede estar asignado operativamente en múltiples locaciones simultáneamente en el mismo horario.': 'An employee cannot be assigned operationally to multiple locations at the same time in the same schedule.',
+        'Historial de Asignaciones': 'Assignment History',
+        'Ver Historial': 'View History',
+        'Imprimir': 'Print',
+        'Selecciona una fecha para ver el historial de asignaciones': 'Select a date to view assignment history',
+        'Seleccionar locación...': 'Select location...',
+        'Todas las Categorías': 'All Categories',
+        'Fecha específica': 'Specific date',
+        'Gestión de Tareas': 'Task Management',
+        'Nueva Tarea': 'New Task',
+        'Configuración de Break': 'Break Configuration',
+        'Tipo de Break': 'Break Type',
+        'Horario del Break': 'Break Schedule',
+        'Empleado que cubre el break': 'Employee covering break',
+        'Contacto': 'Contact',
+        'Gestión de Locaciones': 'Location Management',
+        'Registro de Locaciones Cerradas': 'Closed Locations Log',
+        'Fecha:': 'Date:',
+        'Deshabilitar': 'Disable',
+        'Habilitar': 'Enable',
+        'Por Empleado': 'By Employee',
+        'Por Locación': 'By Location',
+        'Buscar por habilidad, área o nombre...': 'Search by skill, area, or name...',
+        'Consultar': 'Search',
+        'Café': 'Coffee',
+        'Tienda': 'Store',
+        'Souvenirs': 'Souvenirs',
+        'Comida': 'Food',
+        'Todos los Grupos': 'All Groups',
+        'Todos los Estados': 'All Statuses',
+        'Contacto': 'Contact',
+        'Panel de Gestión': 'Management Panel',
+        'Empleados': 'Employees',
+        'Locaciones': 'Locations',
+        'Tareas Activas': 'Active Tasks',
+        'Asignación a Locaciones': 'Location Assignment',
+        'Historial': 'History',
+        'Consultas Inteligentes': 'Smart Queries',
+        'Nuevo Empleado': 'New Employee',
+        'Actualizar': 'Refresh',
+        'Borrar Asignaciones del Día': 'Clear Day Assignments',
+        'Asignar Automáticamente': 'Auto Assign',
+        'Asignar Supervisores': 'Assign Supervisors',
+        'Resultados de Asignación': 'Assignment Results',
+        'Gestión de Empleados': 'Employee Management',
+        'Buscar empleados...': 'Search employees...',
+        'Todos los roles': 'All roles',
+        'Todos los estados': 'All statuses',
+        'Todos los departamentos': 'All departments',
+        'Employee': 'Employee',
+        'Role': 'Role',
+        'Group': 'Group',
+        'Department': 'Department',
+        'Versatile': 'Versatile',
+        'Skills': 'Skills',
+        'Status': 'Status',
+        'Actions': 'Actions',
+        'No hay empleados. Haz clic en "Nuevo Empleado".': 'No employees. Click "New Employee".',
+        'No hay asignaciones para esta fecha': 'No assignments for this date',
+        'Sin break': 'No break',
+        'Self Break': 'Self Break',
+        'Cubierto por': 'Covered by',
+        'Disponible': 'Available',
+        'En Break': 'On Break',
+        'En Training': 'On Training',
+        'Day Off': 'Day Off',
+        'Festivo': 'Holiday',
+        'Vista': 'View',
+        'Editar': 'Edit',
+        'Eliminar': 'Delete',
+        'Guardar Empleado': 'Save Employee',
+        'Nueva Tarea': 'New Task',
+        'Gestión de Tareas': 'Task Management',
+        'Categoría': 'Category',
+        'Fecha Límite': 'Due Date',
+        'Prioridad': 'Priority',
+        'Datos actualizados': 'Data updated',
+        'Registro de Locaciones Cerradas': 'Closed Locations Log',
+        'Todas las locaciones': 'All locations',
+        'Buscar por usuario...': 'Search by user...',
+        'No hay registros que coincidan con los filtros.': 'No records match the filters.',
+        'Locación': 'Location',
+        'Locaciones': 'Locations',
+        'Fecha': 'Date',
+        'Hora': 'Time',
+        'Motivo': 'Reason',
+        'Cerrado por': 'Closed by',
+        'Deshabilitar': 'Disable',
+        'Habilitar': 'Enable',
+        'Gestión de Locaciones': 'Location Management',
+        'Personal Mínimo': 'Minimum Staff',
+        'Configuración de Break': 'Break Configuration',
+        'Tipo de Break': 'Break Type',
+        'Horario del Break': 'Break Schedule',
+        'Empleado que cubre el break': 'Employee covering break',
+        'Eliminar Todas las Asignaciones': 'Clear All Assignments',
+        'Cancelar': 'Cancel',
+        'Enviar Mensaje': 'Send Message',
+        'Datos de Foods cargados': 'Foods data loaded',
+        'Datos de Retail cargados': 'Retail data loaded',
+        'Empleado eliminado': 'Employee deleted',
+        'Empleado actualizado': 'Employee updated',
+        'Empleado agregado': 'Employee added',
+        'Asignación eliminada': 'Assignment deleted',
+        'Asignaciones del día eliminadas': 'Day assignments deleted',
+        'Idioma': 'Language',
+        'Base': 'Base',
+        'Nombre': 'Name',
+        'Nacionalidad': 'Nationality',
+        'Edad': 'Age',
+        'Fecha de Ingreso': 'Hire Date',
+        'Rol': 'Role',
+        'Grupo': 'Group',
+        'Habilidades / Capacitaciones': 'Skills / Training',
+        'Categoría': 'Category',
+        'Fecha Límite': 'Due Date',
+        'Prioridad': 'Priority',
+        'Estado': 'Status',
+        'Título': 'Title',
+        'Descripción': 'Description',
+        'Asignado a': 'Assigned to',
+        'Todos los Grupos': 'All Groups',
+        'Todos los Estados': 'All Statuses',
+        'Todos los departamentos': 'All departments',
+        'Todos los roles': 'All roles',
+        'Todos los estados': 'All statuses',
+        'Tareas Activas': 'Active Tasks',
+        'Asignación a Locaciones': 'Location Assignment',
+        'Versátil': 'Versatile',
+        'Grupo A': 'Group A',
+        'Grupo B': 'Group B',
+        'Grupo C': 'Group C',
+        ' Grupo A': ' Group A',
+        ' Grupo B': ' Group B',
+        ' Grupo C': ' Group C',
+        'Supervisor': 'Supervisor',
+        'Assistant Supervisor': 'Assistant Supervisor',
+        'Cashier': 'Cashier',
+        'Server': 'Server',
+        'Dishwasher': 'Dishwasher',
+        'Cook': 'Cook',
+        'Bartender': 'Bartender',
+        'OP': 'OP',
+        'server': 'Server',
+        'cashier': 'Cashier',
+        'dishwasher': 'Dishwasher',
+        'cook': 'Cook',
+        'bartender': 'Bartender',
+        'assistant-supervisor': 'Assistant Supervisor',
+        'supervisor': 'Supervisor',
+        'op': 'OP',
+        'Grupo A - Frente del parque (Pixie Kitchen, Food Fair, Oasis, Slush Factory)': 'Group A - Front of park',
+        'Grupo B - Medio del parque (Guard House, Dutch Village, Poblano Cantina, World Pavilion, Teddy\'s Oasis)': 'Group B - Middle of park',
+        'Grupo C - Fondo del parque (Barnyard Pizza, Dippin\' Dots, Farm Stand)': 'Group C - Back of park',
+        'Asignar': 'Assign',
+        'Remover': 'Remove',
+        'Sin asignar': 'Unassigned',
+        'No hay asignaciones. Usa "Asignar Automáticamente" o asigna manualmente.': 'No assignments. Use "Auto Assign" or assign manually.',
+        'Historial de asignaciones por empleado': 'Assignment history by employee',
+        'Sign in': 'Sign in',
+        'Selected': 'Selected',
+        'Sin asignación para esta fecha.': 'Not assigned for this date.',
+        'No asignado para esta fecha.': 'Not assigned for this date.',
+        'Locación:': 'Location:',
+        'Horario:': 'Schedule:',
+        'Rol:': 'Role:',
+        'Estado:': 'Status:',
+        'Break:': 'Break:',
+        'Asignado a:': 'Assigned to:',
+        'Cubierto por': 'Covered by',
+        'Self Break,': 'Self Break,',
+        'Cubierto por #': 'Covered by #',
+        'Asignar Supervisor': 'Assign Supervisor',
+        'Seleccionar Supervisor:': 'Select Supervisor:',
+        'Seleccionar Locación': 'Select Location',
+        'Elegir locación...': 'Choose location...',
+        'Resultados por empleado:': 'Results by employee:',
+        'Resultados por rol:': 'Results by role:',
+        'No se encontraron resultados.': 'No results found.',
+        'Escribe una locación, nombre o rol.': 'Type a location, name, or role.',
+        'No hay empleados asignados en la fecha seleccionada.': 'No employees assigned on the selected date.',
+        'Base': 'Base',
+        'Nombre': 'Name',
+        'Nacionalidad': 'Nationality',
+        'Edad': 'Age',
+        'Fecha de Ingreso': 'Hire Date',
+        'Rol': 'Role',
+        'Grupo': 'Group',
+        'Habilidades / Capacitaciones': 'Skills / Training',
+        'Categoría': 'Category',
+        'Fecha Límite': 'Due Date',
+        'Prioridad': 'Priority',
+        'Estado': 'Status',
+        'Título': 'Title',
+        'Descripción': 'Description',
+        'Asignado a': 'Assigned to',
+        'Todos los Grupos': 'All Groups',
+        'Todos los Estados': 'All Statuses',
+        'Todos los departamentos': 'All departments',
+        'Todos los roles': 'All roles',
+        'Todos los estados': 'All statuses',
+        'Tareas Activas': 'Active Tasks',
+        'Asignación a Locaciones': 'Location Assignment',
+    }
+};
+// Generate reverse translations so switching back to Spanish works
+translations.es = Object.fromEntries(
+    Object.entries(translations.en).map(([k, v]) => [v, k])
+);
+
+function translatePage() {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+    const textNodes = [];
+    let node;
+    while (node = walker.nextNode()) {
+        if (!node.parentElement.closest('script, style')) {
+            textNodes.push(node);
+        }
+    }
+    textNodes.forEach(textNode => {
+        const esText = textNode.nodeValue.trim();
+        if (translations[currentLang] && translations[currentLang][esText]) {
+            textNode.nodeValue = textNode.nodeValue.replace(esText, translations[currentLang][esText]);
+        }
+    });
+
+    document.querySelectorAll('[placeholder]').forEach(el => {
+        const esText = el.getAttribute('placeholder');
+        if (translations[currentLang] && translations[currentLang][esText]) {
+            el.setAttribute('placeholder', translations[currentLang][esText]);
+        }
+    });
+}
+
+function handleLanguageChange(lang) {
+    document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.lang-btn[data-lang="${lang}"]`)?.classList.add('active');
+    localStorage.setItem('appLanguage', lang);
+    currentLang = lang;
+    // Apply immediate translation to static content, then refresh dynamic sections
+    translatePage();
+    setTimeout(() => {
+        loadInitialData();
+        renderManagementGrid();
+        refreshClosureHistoryPanel();
+    }, 100);
+}
+
+// Apply saved language on load
+setTimeout(() => {
+    const activeBtn = document.querySelector(`.lang-btn[data-lang="${currentLang}"]`);
+    if (activeBtn) {
+        document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+        activeBtn.classList.add('active');
+    }
+    translatePage();
+}, 50);
+
+// Wrap renderers so dynamically generated content is translated after each refresh
+function wrapRenderer(fnName) {
+    const original = window[fnName];
+    if (typeof original === 'function') {
+        window[fnName] = function(...args) {
+            const result = original.apply(this, args);
+            translatePage();
+            return result;
+        };
+    }
+}
+wrapRenderer('renderEmployees');
+wrapRenderer('renderTasks');
+wrapRenderer('renderLocationsGrid');
+wrapRenderer('renderLocationCards');
+wrapRenderer('displayOptimizationResults');
+wrapRenderer('renderManagementGrid');
+wrapRenderer('renderClosureHistory');
 
 // ============================================
 // START

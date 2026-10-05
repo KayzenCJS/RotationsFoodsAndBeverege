@@ -8,6 +8,11 @@
     <link rel="stylesheet" href="style.css" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <script>
+        // Optional: set this to your deployed backend URL when frontend is hosted separately.
+        // Example: window.API_BASE_URL = 'https://your-backend.onrender.com/api';
+        // window.API_BASE_URL = 'https://your-backend.onrender.com/api';
+    </script>
     <script src="api.js"></script>
 </head>
 <body>
@@ -23,14 +28,13 @@
                     <button class="lang-btn" data-lang="en">EN</button>
                 </div>
                 <ul class="nav-menu">
-                    <li class="nav-item"><a href="#inicio" class="nav-link">Inicio</a></li>
+                    <li class="nav-item"><a href="#inicio" class="nav-link" onclick="updateStats()">Inicio</a></li>
                     <li class="nav-item"><a href="#servicios" class="nav-link" onclick="switchType('foods')">Foods</a></li>
                     <li class="nav-item"><a href="#servicios" class="nav-link" onclick="switchType('retail')">Retail</a></li>
-                    <li class="nav-item"><a href="#demo" class="nav-link">Gestión</a></li>
-                    <li class="nav-item"><a href="#tasks" class="nav-link" onclick="scrollToTasks()">Tareas</a></li>
+                    <li class="nav-item"><a href="#demo" class="nav-link" onclick="loadInitialData()">Gestión</a></li>
+                    <li class="nav-item"><a href="#tasks" class="nav-link" onclick="scrollToTasks(); refreshTasksPanel();">Tareas</a></li>
                     <li class="nav-item"><a href="#" class="nav-link" onclick="openAdminPanel()">Admin</a></li>
                     <li class="nav-item"><a href="#" class="nav-link" onclick="openWastelog()">Wastelog</a></li>
-                    <li class="nav-item"><a href="#contacto" class="nav-link">Contacto</a></li>
                 </ul>
                 <div class="nav-toggle">
                     <span class="bar"></span>
@@ -101,15 +105,76 @@
             </div>
 
             <!-- Employee Management -->
-            <div class="demo-section">
-                <div class="section-title">
-                    <h3><i class="fas fa-users"></i> Gestión de Empleados</h3>
-                    <div style="display:flex; gap:0.5rem; align-items:center;">
-                        <span class="employee-count-badge" id="employeeCountBadge">0 empleados</span>
-                        <button class="btn btn-primary" onclick="openEmployeeModal()"><i class="fas fa-plus"></i> Nuevo Empleado</button>
+            <div class="demo-section employee-management-section">
+                <div class="employee-admin-layout">
+                    <aside class="employee-sidebar">
+                        <h4>Employee Management</h4>
+                        <nav class="employee-sidebar-nav">
+                            <button class="employee-nav-item active" data-section="all" onclick="setEmployeeSection('all')"><i class="fas fa-users"></i> Employees</button>
+                            <button class="employee-nav-item" data-section="skills" onclick="setEmployeeSection('skills')"><i class="fas fa-tools"></i> Skills</button>
+                            <button class="employee-nav-item" data-section="certifications" onclick="setEmployeeSection('certifications')"><i class="fas fa-certificate"></i> Certifications</button>
+                            <button class="employee-nav-item" data-section="availability" onclick="setEmployeeSection('availability')"><i class="fas fa-calendar-alt"></i> Availability</button>
+                            <button class="employee-nav-item" data-section="service" onclick="setEmployeeSection('service')"><i class="fas fa-concierge-bell"></i> Service & Sales</button>
+                            <button class="employee-nav-item" data-section="retail" onclick="setEmployeeSection('retail')"><i class="fas fa-store"></i> Retail</button>
+                            <button class="employee-nav-item" data-section="history" onclick="setEmployeeSection('history')"><i class="fas fa-history"></i> History</button>
+                        </nav>
+                    </aside>
+
+                    <div class="employee-admin-main">
+                        <div class="section-title employee-admin-header">
+                            <div>
+                                <h3><i class="fas fa-users"></i> Gestión de Empleados</h3>
+                                <p class="employee-breadcrumb">Employee Management / Employees</p>
+                            </div>
+                            <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                                <span class="employee-count-badge" id="employeeCountBadge">0 empleados</span>
+                                <button class="btn btn-primary" onclick="openEmployeeModal()"><i class="fas fa-plus"></i> Nuevo Empleado</button>
+                                <button class="btn btn-secondary" onclick="refreshEmployeesPanel()" id="refreshEmployeesBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
+                            </div>
+                        </div>
+
+                        <div class="employee-toolbar">
+                            <input type="search" id="employeeSearch" placeholder="Buscar empleados..." oninput="filterEmployees()" />
+                            <select id="employeeRoleFilter" onchange="filterEmployees()">
+                                <option value="">Todos los roles</option>
+                                <option value="server">Server</option>
+                                <option value="cashier">Cashier</option>
+                                <option value="dishwasher">Dishwasher</option>
+                                <option value="cook">Cook</option>
+                                <option value="bartender">Bartender</option>
+                                <option value="assistant-supervisor">Assistant Supervisor</option>
+                                <option value="supervisor">Supervisor</option>
+                                <option value="op">OP</option>
+                            </select>
+                            <select id="employeeStatusFilter" onchange="filterEmployees()">
+                                <option value="">Todos los estados</option>
+                                <option value="available">Disponible</option>
+                                <option value="break">En Break</option>
+                                <option value="training">En Training</option>
+                                <option value="dayoff">Day Off</option>
+                                <option value="holiday">Festivo</option>
+                            </select>
+                            <select id="employeeTypeFilter" onchange="filterEmployees()">
+                                <option value="">Todos los departamentos</option>
+                                <option value="foods">Foods</option>
+                                <option value="retail">Retail</option>
+                            </select>
+                        </div>
+
+                        <div class="employee-table-container" id="employeesList"></div>
                     </div>
                 </div>
-                <div class="employees-grid" id="employeesList"></div>
+            </div>
+
+            <!-- Employee Detail Modal -->
+            <div id="employeeDetailModal" class="modal">
+                <div class="modal-content employee-detail-content">
+                    <div class="modal-header">
+                        <h3 id="employeeDetailTitle">Detalles del Empleado</h3>
+                        <span class="close" onclick="closeEmployeeDetail()">&times;</span>
+                    </div>
+                    <div id="employeeDetailBody"></div>
+                </div>
             </div>
 
             <!-- Location Assignment -->
@@ -120,9 +185,13 @@
                         <button class="btn btn-primary btn-large optimization-btn" onclick="optimizeAssignment()" style="background:linear-gradient(135deg,#10b981,#059669); border:none; padding:12px 24px; font-size:1rem;">
                             <i class="fas fa-magic"></i> Asignar Automáticamente
                         </button>
+                        <button class="btn btn-secondary" onclick="clearAssignmentsForDate()" id="clearAssignmentsBtn" style="border-color:#ef4444;color:#ef4444;">
+                            <i class="fas fa-trash"></i> Borrar Asignaciones del Día
+                        </button>
                         <button class="btn btn-secondary" onclick="openSupervisorAssignmentModal()">
                             <i class="fas fa-user-tie"></i> Asignar Supervisores
                         </button>
+                        <button class="btn btn-secondary" onclick="refreshAssignmentsPanel()" id="refreshAssignmentsBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
                     </div>
                 </div>
                 <div class="optimization-content">
@@ -147,6 +216,7 @@
                         <input type="date" id="historyDate" style="padding:0.5rem; border:1px solid #e2e8f0; border-radius:8px;" />
                         <button class="btn btn-primary" onclick="loadAssignmentHistory()"><i class="fas fa-search"></i> Ver Historial</button>
                         <button class="btn btn-secondary" onclick="printAssignmentHistory()"><i class="fas fa-print"></i> Imprimir</button>
+                        <button class="btn btn-secondary" onclick="refreshHistoryPanel()" id="refreshHistoryBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
                     </div>
                 </div>
                 <div class="history-content" id="historyContent">
@@ -158,6 +228,7 @@
             <div class="demo-section" style="display:none;" id="adminLocationsSection">
                 <div class="section-title">
                     <h3><i class="fas fa-store-slash"></i> Gestión de Locaciones</h3>
+                    <button class="btn btn-secondary" onclick="refreshLocationManagementPanel()" id="refreshLocationManagementBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
                 </div>
                 <div class="locations-management">
                     <div class="day-selector">
@@ -168,14 +239,23 @@
                 </div>
             </div>
 
-            <!-- Staffing Rules Management -->
-            <div class="demo-section" style="display:none;" id="adminStaffingSection">
+            <!-- Closure History -->
+            <div class="demo-section" style="display:none;" id="adminClosureHistorySection">
                 <div class="section-title">
-                    <h3><i class="fas fa-users-cog"></i> Reglas de Personal Mínimo</h3>
-                    <button class="btn btn-secondary" onclick="refreshStaffingRules()"><i class="fas fa-sync"></i> Actualizar</button>
+                    <h3><i class="fas fa-store-slash"></i> Registro de Locaciones Cerradas</h3>
+                    <button class="btn btn-secondary" onclick="refreshClosureHistoryPanel()" id="refreshClosureHistoryBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
                 </div>
-                <div class="staffing-rules-container" id="staffingRulesContainer">
-                    <p style="text-align:center;color:#6b7280;">Cargando reglas de staffing...</p>
+                <div class="locations-management">
+                    <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:1rem;">
+                        <input type="date" id="closureHistoryDate" placeholder="Fecha" onchange="filterClosureHistory()" />
+                        <select id="closureHistoryLocation" onchange="filterClosureHistory()">
+                            <option value="">Todas las locaciones</option>
+                        </select>
+                        <input type="text" id="closureHistoryUser" placeholder="Buscar por usuario..." oninput="filterClosureHistory()" />
+                    </div>
+                    <div class="closure-history-container" id="closureHistoryContainer">
+                        <p style="text-align:center;color:#6b7280;">Cargando registro...</p>
+                    </div>
                 </div>
             </div>
 
@@ -221,7 +301,10 @@
             <div class="demo-section">
                 <div class="section-title">
                     <h3><i class="fas fa-tasks"></i> Gestión de Tareas</h3>
-                    <button class="btn btn-primary" onclick="openTaskModal()"><i class="fas fa-plus"></i> Nueva Tarea</button>
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <button class="btn btn-primary" onclick="openTaskModal()"><i class="fas fa-plus"></i> Nueva Tarea</button>
+                        <button class="btn btn-secondary" onclick="refreshTasksPanel()" id="refreshTasksBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
+                    </div>
                 </div>
                 <div class="task-area">
                     <div class="task-filters">
@@ -253,32 +336,6 @@
         </div>
     </section>
 
-    <!-- Contact Section -->
-    <section id="contacto" class="contact">
-        <div class="container">
-            <div class="contact-content">
-                <div class="contact-info">
-                    <h2>¿Listo para optimizar tu operación?</h2>
-                    <p>Sistema de gestión diseñado específicamente para las locaciones de StoryLand NH.</p>
-                    <div class="contact-methods">
-                        <div class="contact-method"><i class="fas fa-envelope"></i><div><h4>Email</h4><p>info@storymanager.com</p></div></div>
-                        <div class="contact-method"><i class="fas fa-phone"></i><div><h4>Teléfono</h4><p>+1 (603) 555-0123</p></div></div>
-                        <div class="contact-method"><i class="fas fa-map-marker-alt"></i><div><h4>Ubicación</h4><p>Story Land, Glen NH 03838</p></div></div>
-                    </div>
-                </div>
-                <div class="contact-form">
-                    <form id="contactForm">
-                        <div class="form-group"><input type="text" id="name" placeholder="Tu Nombre" required /></div>
-                        <div class="form-group"><input type="email" id="email" placeholder="Tu Email" required /></div>
-                        <div class="form-group"><input type="text" id="company" placeholder="Tu Parque o Empresa" /></div>
-                        <div class="form-group"><textarea id="message" placeholder="Cuéntanos sobre tus necesidades..." rows="4" required></textarea></div>
-                        <button type="submit" class="btn btn-primary btn-full">Enviar Mensaje</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </section>
-
     <!-- Footer -->
     <footer class="footer">
         <div class="container">
@@ -286,7 +343,7 @@
                 <div class="footer-brand"><h3>Story<span>Manager</span></h3><p>Gestión de personal para StoryLand NH.</p></div>
                 <div class="footer-links">
                     <div class="footer-column"><h4>Locaciones</h4><ul><li><a href="#servicios">Restaurantes</a></li><li><a href="#servicios">Tiendas</a></li></ul></div>
-                    <div class="footer-column"><h4>Empresa</h4><ul><li><a href="#inicio">Inicio</a></li><li><a href="#demo">Demo</a></li><li><a href="#contacto">Contacto</a></li></ul></div>
+                    <div class="footer-column"><h4>Empresa</h4><ul><li><a href="#inicio">Inicio</a></li><li><a href="#demo">Demo</a></li></ul></div>
                 </div>
             </div>
             <div class="footer-bottom"><p>&copy; 2025 StoryManager. Todos los derechos reservados.</p></div>
@@ -411,7 +468,7 @@
                                 <option value="">Seleccionar...</option>
                                 <option value="A">Grupo A - Frente del parque (Pixie Kitchen, Food Fair, Oasis, Slush Factory)</option>
                                 <option value="B">Grupo B - Medio del parque (Guard House, Dutch Village, Poblano Cantina, World Pavilion, Teddy's Oasis)</option>
-                                <option value="C">Grupo C - Fondo del parque (Barnyard Pizza, Dippin' Dots, Farm Stand, Sandwich Oasis)</option>
+                                <option value="C">Grupo C - Fondo del parque (Barnyard Pizza, Dippin' Dots, Farm Stand)</option>
                             </select>
                         </div>
                     </div>

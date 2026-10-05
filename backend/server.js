@@ -1,10 +1,20 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const path = require('path');
 const { foods, retail, testConnections } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Timezone configuration
+const TIMEZONE = 'America/Santo_Domingo';
+
+function getCurrentDateInTimezone() {
+    const now = new Date();
+    const dateInTimezone = new Date(now.toLocaleString('en-US', { timeZone: TIMEZONE }));
+    return dateInTimezone.toISOString().split('T')[0];
+}
 
 // ============================================
 // MIDDLEWARE
@@ -13,6 +23,9 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+
+// Serve frontend files from project root
+app.use(express.static(path.join(__dirname, '..')));
 
 // ============================================
 // HELPERS
@@ -65,18 +78,41 @@ app.get('/health', async (req, res) => {
 app.get('/api/:type/employees', async (req, res) => {
     try {
         const pool = getPool(req.params.type);
-        const result = await pool.query(`
-            SELECT e.*, 
-                   array_agg(DISTINCT et.training_name) as trainings,
-                   ea.is_on_break, ea.is_on_training, ea.is_day_off, ea.is_holiday,
+
+        // If type is 'retail', fetch employees from foods database that have 'retail' training
+        if (req.params.type === 'retail') {
+            const foodsPool = getPool('foods');
+            const result = await foodsPool.query(`
+                SELECT e.*,
+                       array_agg(DISTINCT et.training_name) as trainings,
+                       ea.is_on_break, ea.is_on_training, ea.is_day_off, ea.is_holiday,
+                       ea.schedule_start_time, ea.schedule_end_time, ea.days_off, ea.holidays
+                FROM employees e
+                LEFT JOIN employee_trainings et ON e.id = et.employee_id
+                LEFT JOIN employee_availability ea ON e.id = ea.employee_id
+                WHERE e.id IN (
+                    SELECT DISTINCT employee_id
+                    FROM employee_trainings
+                    WHERE training_name = 'retail'
+                )
+                GROUP BY e.id, ea.id
+                ORDER BY e.id
+            `);
+            res.json(result.rows);
+        } else {
+            const result = await pool.query(`
+                SELECT e.*,
+                       array_agg(DISTINCT et.training_name) as trainings,
+                       ea.is_on_break, ea.is_on_training, ea.is_day_off, ea.is_holiday,
                    ea.schedule_start_time, ea.schedule_end_time, ea.days_off, ea.holidays
-            FROM employees e
-            LEFT JOIN employee_trainings et ON e.id = et.employee_id
-            LEFT JOIN employee_availability ea ON e.id = ea.employee_id
-            GROUP BY e.id, ea.id
-            ORDER BY e.id
-        `);
-        res.json(result.rows);
+                FROM employees e
+                LEFT JOIN employee_trainings et ON e.id = et.employee_id
+                LEFT JOIN employee_availability ea ON e.id = ea.employee_id
+                GROUP BY e.id, ea.id
+                ORDER BY e.id
+            `);
+            res.json(result.rows);
+        }
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -105,7 +141,8 @@ app.get('/api/:type/employees/:id', async (req, res) => {
 
 // Create employee
 app.post('/api/:type/employees', async (req, res) => {
-    const client = getPool(req.params.type);
+    // Always use foods database for employee creation (Retail uses Foods employees)
+    const client = getPool('foods');
     try {
         const { name, nationality, age, role, group_id, hire_date, trainings, availability } = req.body;
 
@@ -137,9 +174,9 @@ app.post('/api/:type/employees', async (req, res) => {
             'INSERT INTO employees (name, nationality, age, role, group_id, hire_date, is_versatile) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
             [name, nationality, age, role, group_id, hire_date || new Date().toISOString().split('T')[0], is_versatile]
         );
-        
+
         const empId = empResult.rows[0].id;
-        
+
         // Insert trainings
         if (trainings && trainings.length > 0) {
             // Insert trainings one by one to avoid parameter limit
@@ -150,10 +187,10 @@ app.post('/api/:type/employees', async (req, res) => {
                 );
             }
         }
-        
+
         // Insert availability
         await client.query(`
-            INSERT INTO employee_availability (employee_id, is_on_break, is_on_training, is_day_off, is_holiday, 
+            INSERT INTO employee_availability (employee_id, is_on_break, is_on_training, is_day_off, is_holiday,
                 schedule_start_time, schedule_end_time, days_off, holidays)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         `, [
@@ -167,12 +204,12 @@ app.post('/api/:type/employees', async (req, res) => {
             availability?.daysOff || ['sunday'],
             availability?.holidays || []
         ]);
-        
+
         await client.query('COMMIT');
-        
+
         // Fetch the complete employee data
         const result = await client.query(`
-            SELECT e.*, 
+            SELECT e.*,
                    array_agg(DISTINCT et.training_name) as trainings,
                    ea.is_on_break, ea.is_on_training, ea.is_day_off, ea.is_holiday,
                    ea.schedule_start_time, ea.schedule_end_time, ea.days_off, ea.holidays
@@ -182,7 +219,7 @@ app.post('/api/:type/employees', async (req, res) => {
             WHERE e.id = $1
             GROUP BY e.id, ea.id
         `, [empId]);
-        
+
         res.status(201).json(result.rows[0]);
     } catch (err) {
         await client.query('ROLLBACK');
@@ -192,7 +229,8 @@ app.post('/api/:type/employees', async (req, res) => {
 
 // Update employee
 app.put('/api/:type/employees/:id', async (req, res) => {
-    const client = getPool(req.params.type);
+    // Always use foods database for employee updates (Retail uses Foods employees)
+    const client = getPool('foods');
     try {
         const { name, nationality, age, role, group_id, hire_date, trainings, availability } = req.body;
 
@@ -217,16 +255,16 @@ app.put('/api/:type/employees/:id', async (req, res) => {
         }
 
         const is_versatile = qualifiedRoles >= 3;
-        
+
         console.log('Update employee request:', { id: req.params.id, name, nationality, age, role, group_id, trainingsCount: trainings?.length });
-        
+
         await client.query('BEGIN');
-        
+
         await client.query(
             'UPDATE employees SET name = $1, nationality = $2, age = $3, role = $4, group_id = $5, hire_date = $6, is_versatile = $7, updated_at = NOW() WHERE id = $8',
             [name, nationality, age, role, group_id, hire_date, is_versatile, req.params.id]
         );
-        
+
         // Update trainings
         await client.query('DELETE FROM employee_trainings WHERE employee_id = $1', [req.params.id]);
         if (trainings && trainings.length > 0) {
@@ -239,7 +277,7 @@ app.put('/api/:type/employees/:id', async (req, res) => {
                 );
             }
         }
-        
+
         // Update or insert availability
         const availabilityExists = await client.query(
             'SELECT id FROM employee_availability WHERE employee_id = $1',
@@ -248,7 +286,7 @@ app.put('/api/:type/employees/:id', async (req, res) => {
 
         if (availabilityExists.rows.length > 0) {
             await client.query(`
-                UPDATE employee_availability 
+                UPDATE employee_availability
                 SET is_on_break = $1, is_on_training = $2, is_day_off = $3, is_holiday = $4,
                     schedule_start_time = $5, schedule_end_time = $6, days_off = $7, holidays = $8, updated_at = NOW()
                 WHERE employee_id = $9
@@ -280,12 +318,12 @@ app.put('/api/:type/employees/:id', async (req, res) => {
                 availability?.holidays || []
             ]);
         }
-        
+
         await client.query('COMMIT');
-        
+
         // Fetch the complete employee data
         const result = await client.query(`
-            SELECT e.*, 
+            SELECT e.*,
                    array_agg(DISTINCT et.training_name) as trainings,
                    ea.is_on_break, ea.is_on_training, ea.is_day_off, ea.is_holiday,
                    ea.schedule_start_time, ea.schedule_end_time, ea.days_off, ea.holidays
@@ -295,7 +333,7 @@ app.put('/api/:type/employees/:id', async (req, res) => {
             WHERE e.id = $1
             GROUP BY e.id, ea.id
         `, [req.params.id]);
-        
+
         res.json(result.rows[0]);
     } catch (err) {
         console.error('Error updating employee:', err);
@@ -438,26 +476,68 @@ app.post('/api/:type/assignments', async (req, res) => {
         const pool = getPool(req.params.type);
         const { location_id, employee_id, work_date, start_time, end_time } = req.body;
 
-        // Check for time conflicts with existing assignments
+        // Check if location is disabled for this date
+        const disableCheck = await pool.query(
+            `SELECT * FROM location_disables
+             WHERE location_id = $1
+             AND disable_date = $2
+             AND enabled_at IS NULL
+             AND (reactivation_date IS NULL OR reactivation_date > $2)`,
+            [location_id, work_date]
+        );
+
+        if (disableCheck.rows.length > 0) {
+            const disable = disableCheck.rows[0];
+            return res.status(400).json({
+                error: 'location_disabled',
+                message: `La locación ${location_id} está cerrada para la fecha ${work_date}. Motivo: ${disable.disable_reason}. No se pueden crear asignaciones.`
+            });
+        }
+
+        // For Retail, also check for conflicts in Foods assignments
+        if (req.params.type === 'retail') {
+            const foodsPool = getPool('foods');
+            const foodsConflictCheck = await foodsPool.query(
+                `SELECT location_id, start_time, end_time
+                 FROM assignments
+                 WHERE employee_id = $1
+                 AND work_date = $2
+                 AND (
+                     (start_time < $3 AND end_time > $4) OR
+                     (start_time < $3 AND end_time >= $3) OR
+                     (start_time <= $4 AND end_time > $4)
+                 )`,
+                [employee_id, work_date, end_time, start_time]
+            );
+
+            if (foodsConflictCheck.rows.length > 0) {
+                const conflict = foodsConflictCheck.rows[0];
+                return res.status(400).json({
+                    error: 'schedule_conflict',
+                    message: `El empleado ya tiene una asignación en Foods (${conflict.location_id}) durante el horario ${conflict.start_time} - ${conflict.end_time}. No puede estar en dos locaciones al mismo tiempo.`
+                });
+            }
+        }
+
+        // Check for time conflicts with existing assignments in current type
         const conflictCheck = await pool.query(
             `SELECT location_id, start_time, end_time
              FROM assignments
              WHERE employee_id = $1
              AND work_date = $2
-             AND location_id = $3
              AND (
-                 (start_time < $4 AND end_time > $5) OR
-                 (start_time < $4 AND end_time >= $4) OR
-                 (start_time <= $5 AND end_time > $5)
+                 (start_time < $3 AND end_time > $4) OR
+                 (start_time < $3 AND end_time >= $3) OR
+                 (start_time <= $4 AND end_time > $4)
              )`,
-            [employee_id, work_date, location_id, end_time, start_time]
+            [employee_id, work_date, end_time, start_time]
         );
 
         if (conflictCheck.rows.length > 0) {
             const conflict = conflictCheck.rows[0];
             return res.status(400).json({
                 error: 'schedule_conflict',
-                message: `El empleado ya tiene una asignación en esta locación durante el horario ${conflict.start_time} - ${conflict.end_time}`
+                message: `El empleado ya tiene una asignación en ${conflict.location_id} durante el horario ${conflict.start_time} - ${conflict.end_time}. No puede estar en dos locaciones al mismo tiempo.`
             });
         }
 
@@ -465,6 +545,9 @@ app.post('/api/:type/assignments', async (req, res) => {
             'INSERT INTO assignments (location_id, employee_id, work_date, start_time, end_time) VALUES ($1, $2, $3, $4, $5) RETURNING id',
             [location_id, employee_id, work_date, start_time, end_time]
         );
+
+        // Trigger automatic backup after assignment creation
+        performBackup(req.params.type).catch(err => console.error('Backup failed:', err));
 
         res.json({ id: result.rows[0].id });
     } catch (err) {
@@ -479,27 +562,44 @@ app.put('/api/:type/assignments/:id', async (req, res) => {
         const { location_id, employee_id, work_date, start_time, end_time } = req.body;
         const assignmentId = req.params.id;
 
-        // Check for time conflicts with existing assignments (excluding current assignment)
+        // Check if location is disabled for this date
+        const disableCheck = await pool.query(
+            `SELECT * FROM location_disables
+             WHERE location_id = $1
+             AND disable_date = $2
+             AND enabled_at IS NULL
+             AND (reactivation_date IS NULL OR reactivation_date > $2)`,
+            [location_id, work_date]
+        );
+
+        if (disableCheck.rows.length > 0) {
+            const disable = disableCheck.rows[0];
+            return res.status(400).json({
+                error: 'location_disabled',
+                message: `La locación ${location_id} está cerrada para la fecha ${work_date}. Motivo: ${disable.disable_reason}. No se pueden crear asignaciones.`
+            });
+        }
+
+        // Check for time conflicts with existing assignments in ANY location (excluding current assignment)
         const conflictCheck = await pool.query(
             `SELECT location_id, start_time, end_time
              FROM assignments
              WHERE employee_id = $1
              AND work_date = $2
-             AND location_id = $3
-             AND id != $4
+             AND id != $3
              AND (
-                 (start_time < $5 AND end_time > $6) OR
-                 (start_time < $5 AND end_time >= $5) OR
-                 (start_time <= $6 AND end_time > $6)
+                 (start_time < $4 AND end_time > $5) OR
+                 (start_time < $4 AND end_time >= $4) OR
+                 (start_time <= $5 AND end_time > $5)
              )`,
-            [employee_id, work_date, location_id, assignmentId, end_time, start_time]
+            [employee_id, work_date, assignmentId, end_time, start_time]
         );
 
         if (conflictCheck.rows.length > 0) {
             const conflict = conflictCheck.rows[0];
             return res.status(400).json({
                 error: 'schedule_conflict',
-                message: `El empleado ya tiene una asignación en esta locación durante el horario ${conflict.start_time} - ${conflict.end_time}`
+                message: `El empleado ya tiene una asignación en ${conflict.location_id} durante el horario ${conflict.start_time} - ${conflict.end_time}. No puede estar en dos locaciones al mismo tiempo.`
             });
         }
 
@@ -507,6 +607,9 @@ app.put('/api/:type/assignments/:id', async (req, res) => {
             'UPDATE assignments SET location_id = $1, employee_id = $2, work_date = $3, start_time = $4, end_time = $5 WHERE id = $6 RETURNING *',
             [location_id, employee_id, work_date, start_time, end_time, assignmentId]
         );
+
+        // Trigger automatic backup after assignment update
+        performBackup(req.params.type).catch(err => console.error('Backup failed:', err));
 
         res.json(result.rows[0]);
     } catch (err) {
@@ -940,46 +1043,273 @@ function validateStaffing(requirements, currentAssignments) {
 }
 
 // ============================================
-// BACKUP ENDPOINT
+// EMPLOYEE BREAKS
 // ============================================
 
-app.post('/api/:type/backup', async (req, res) => {
+// Get breaks for a specific date and location
+app.get('/api/:type/breaks', async (req, res) => {
     try {
         const pool = getPool(req.params.type);
-        const { exec } = require('child_process');
-        const fs = require('fs');
-        const path = require('path');
-        
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
-        const backupDir = path.join(__dirname, 'backups');
-        
-        if (!fs.existsSync(backupDir)) {
-            fs.mkdirSync(backupDir, { recursive: true });
+        const { date, location_id } = req.query;
+
+        let query = `
+            SELECT eb.*, e.name as employee_name, e.role as employee_role,
+                   ce.name as covered_by_name, ce.role as covered_by_role
+            FROM employee_breaks eb
+            JOIN employees e ON eb.employee_id = e.id
+            LEFT JOIN employees ce ON eb.covered_by_employee_id = ce.id
+        `;
+        const params = [];
+
+        if (date) {
+            query += ' WHERE eb.work_date = $1';
+            params.push(date);
         }
-        
-        const backupFile = path.join(backupDir, `${req.params.type}_backup_${timestamp}.sql`);
-        
-        const dbConfig = {
-            host: process.env.DB_HOST || 'localhost',
-            port: process.env.DB_PORT || 5432,
-            user: process.env.DB_USER || 'postgres',
-            database: req.params.type === 'foods' ? 'storyland_foods' : 'storyland_retail'
-        };
-        
-        const pgDumpCmd = `pg_dump -h ${dbConfig.host} -p ${dbConfig.port} -U ${dbConfig.user} ${dbConfig.database} > "${backupFile}"`;
-        
-        exec(pgDumpCmd, { env: { ...process.env, PGPASSWORD: process.env.DB_PASSWORD } }, (error, stdout, stderr) => {
-            if (error) {
-                console.error('Backup error:', error);
-                res.status(500).json({ error: 'Backup failed' });
-                return;
-            }
-            res.json({ message: 'Backup created successfully', file: backupFile });
-        });
+
+        if (location_id) {
+            const whereClause = date ? ' AND eb.location_id = $' + (params.length + 1) : ' WHERE eb.location_id = $' + (params.length + 1);
+            query += whereClause;
+            params.push(location_id);
+        }
+
+        query += ' ORDER BY eb.work_date, eb.location_id';
+
+        const result = await pool.query(query, params);
+        res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
+
+// Get break for a specific assignment
+app.get('/api/:type/breaks/assignment/:assignmentId', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        const result = await pool.query(`
+            SELECT eb.*, e.name as employee_name, e.role as employee_role,
+                   ce.name as covered_by_name, ce.role as covered_by_role
+            FROM employee_breaks eb
+            JOIN employees e ON eb.employee_id = e.id
+            LEFT JOIN employees ce ON eb.covered_by_employee_id = ce.id
+            WHERE eb.assignment_id = $1
+        `, [req.params.assignmentId]);
+
+        res.json(result.rows[0] || null);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Create or update break configuration
+app.post('/api/:type/breaks', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        const {
+            assignment_id,
+            employee_id,
+            work_date,
+            location_id,
+            break_type,
+            covered_by_employee_id,
+            break_start_time,
+            break_end_time
+        } = req.body;
+
+        // Validate break type
+        if (!['self', 'covered'].includes(break_type)) {
+            return res.status(400).json({ error: 'Invalid break type. Must be "self" or "covered"' });
+        }
+
+        // If covered break, validate that covered_by_employee_id is provided
+        if (break_type === 'covered' && !covered_by_employee_id) {
+            return res.status(400).json({ error: 'covered_by_employee_id is required for covered breaks' });
+        }
+
+        // If self break, validate staffing requirements by time interval
+        if (break_type === 'self') {
+            const staffingRule = await pool.query(
+                'SELECT * FROM staffing_rules WHERE location_id = $1 AND is_active = true',
+                [location_id]
+            );
+
+            if (staffingRule.rows.length > 0) {
+                const minEmployees = staffingRule.rows[0].min_employees || 1;
+
+                // Get all assignments for this location and date with their schedules
+                const assignments = await pool.query(
+                    `SELECT a.employee_id, a.start_time, a.end_time, e.role
+                     FROM assignments a
+                     JOIN employees e ON a.employee_id = e.id
+                     WHERE a.location_id = $1 AND a.work_date = $2`,
+                    [location_id, work_date]
+                );
+
+                // Count employees who will be working during the break interval
+                // An employee is working during the break if their shift overlaps with the break time
+                const employeesDuringBreak = assignments.rows.filter(a => {
+                    if (a.employee_id === employee_id) return false; // Exclude the employee taking break
+
+                    // Check if the employee's shift overlaps with the break interval
+                    // Overlap condition: (start_time < break_end_time) AND (end_time > break_start_time)
+                    return a.start_time < break_end_time && a.end_time > break_start_time;
+                });
+
+                const availableCount = employeesDuringBreak.length;
+
+                // Check if location can operate with available employees during break
+                if (availableCount < minEmployees) {
+                    return res.status(400).json({
+                        error: 'insufficient_staffing_during_break',
+                        message: `Self break not allowed. Location requires minimum ${minEmployees} employees during ${break_start_time}-${break_end_time}, but only ${availableCount} will be available.`
+                    });
+                }
+
+                // Optional: Check if location has essential roles covered during break
+                // This is a softer check - we only verify that at least one employee has critical skills
+                // if required (e.g., alcohol certification for venues that serve alcohol)
+                const locationServesAlcohol = await pool.query(
+                    'SELECT serves_alcohol FROM locations WHERE id = $1',
+                    [location_id]
+                );
+
+                if (locationServesAlcohol.rows.length > 0 && locationServesAlcohol.rows[0].serves_alcohol) {
+                    // Check if any available employee has alcohol certification
+                    const hasAlcoholCert = employeesDuringBreak.some(emp => {
+                        return emp.trainings && emp.trainings.includes('nh-alcohol-certification');
+                    });
+
+                    if (!hasAlcoholCert) {
+                        return res.status(400).json({
+                            error: 'no_alcohol_certification_during_break',
+                            message: `Self break not allowed. Location serves alcohol but no available employee during ${break_start_time}-${break_end_time} has alcohol certification.`
+                        });
+                    }
+                }
+            }
+        }
+
+        // If covered break, validate that the covering employee has no scheduling conflicts
+        if (break_type === 'covered' && covered_by_employee_id) {
+            const conflictCheck = await pool.query(
+                `SELECT location_id, start_time, end_time
+                 FROM assignments
+                 WHERE employee_id = $1
+                 AND work_date = $2
+                 AND (
+                     (start_time < $3 AND end_time > $4) OR
+                     (start_time < $3 AND end_time >= $3) OR
+                     (start_time <= $4 AND end_time > $4)
+                 )`,
+                [covered_by_employee_id, work_date, break_end_time, break_start_time]
+            );
+
+            if (conflictCheck.rows.length > 0) {
+                return res.status(400).json({
+                    error: 'schedule_conflict',
+                    message: `The employee covering the break has a scheduling conflict with another assignment.`
+                });
+            }
+        }
+
+        // Insert or update break configuration
+        const result = await pool.query(
+            `INSERT INTO employee_breaks (assignment_id, employee_id, work_date, location_id, break_type, covered_by_employee_id, break_start_time, break_end_time)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (assignment_id)
+             DO UPDATE SET break_type = $5, covered_by_employee_id = $6, break_start_time = $7, break_end_time = $8, updated_at = NOW()
+             RETURNING *`,
+            [assignment_id, employee_id, work_date, location_id, break_type, covered_by_employee_id, break_start_time, break_end_time]
+        );
+
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Delete break configuration
+app.delete('/api/:type/breaks/:id', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        await pool.query('DELETE FROM employee_breaks WHERE id = $1', [req.params.id]);
+        res.json({ message: 'Break configuration deleted' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ============================================
+// BACKUP ENDPOINT
+// ============================================
+
+// Helper function to perform backup
+async function performBackup(type) {
+    const { exec } = require('child_process');
+    const fs = require('fs');
+    const path = require('path');
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+    const backupDir = path.join(__dirname, 'backups');
+
+    if (!fs.existsSync(backupDir)) {
+        fs.mkdirSync(backupDir, { recursive: true });
+    }
+
+    const backupFile = path.join(backupDir, `${type}_backup_${timestamp}.sql`);
+
+    const dbConfig = {
+        host: process.env.DB_HOST || 'localhost',
+        port: process.env.DB_PORT || 5432,
+        user: process.env.DB_USER || 'postgres',
+        database: type === 'foods' ? 'storyland_foods' : 'storyland_retail'
+    };
+
+    const pgDumpCmd = `pg_dump -h ${dbConfig.host} -p ${dbConfig.port} -U ${dbConfig.user} ${dbConfig.database} > "${backupFile}"`;
+
+    return new Promise((resolve, reject) => {
+        exec(pgDumpCmd, { env: { ...process.env, PGPASSWORD: process.env.DB_PASSWORD } }, (error, stdout, stderr) => {
+            if (error) {
+                console.error('Backup error:', error);
+                reject(error);
+                return;
+            }
+            console.log(`Backup created successfully: ${backupFile}`);
+            resolve({ message: 'Backup created successfully', file: backupFile });
+        });
+    });
+}
+
+app.post('/api/:type/backup', async (req, res) => {
+    try {
+        const result = await performBackup(req.params.type);
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ============================================
+// AUTOMATIC DAILY BACKUP SCHEDULER
+// ============================================
+
+// Schedule automatic daily backups at midnight
+function scheduleDailyBackups() {
+    const cron = require('node-cron');
+
+    // Run backup every day at midnight (00:00)
+    cron.schedule('0 0 * * *', async () => {
+        console.log('Starting daily automatic backup...');
+        try {
+            await performBackup('foods');
+            await performBackup('retail');
+            console.log('Daily backups completed successfully');
+        } catch (error) {
+            console.error('Daily backup failed:', error);
+        }
+    });
+
+    console.log('Daily backup scheduler started (runs at 00:00 daily)');
+}
 
 // ============================================
 // START SERVER
@@ -988,4 +1318,7 @@ app.post('/api/:type/backup', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Health check: http://localhost:${PORT}/health`);
+
+    // Start automatic daily backup scheduler
+    scheduleDailyBackups();
 });

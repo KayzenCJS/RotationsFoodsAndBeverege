@@ -2,7 +2,8 @@
 // API CLIENT
 // ============================================
 
-const API_BASE_URL = 'http://localhost:3002/api';
+const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const API_BASE_URL = window.API_BASE_URL || (isLocalhost ? 'http://localhost:3002/api' : `${window.location.origin}/api`);
 let currentType = 'foods'; // 'foods' or 'retail'
 
 // ============================================
@@ -285,4 +286,42 @@ async function fetchAssignmentHistory(date) {
         throw new Error(`HTTP error! status: ${response.status}`);
     }
     return await response.json();
+}
+
+// ============================================
+// EMPLOYEE BREAKS API
+// ============================================
+
+async function fetchBreaks(date = null, locationId = null) {
+    let query = '';
+    if (date) query += `?date=${date}`;
+    if (locationId) query += query ? `&location_id=${locationId}` : `?location_id=${locationId}`;
+    return await apiRequest(`/breaks${query}`);
+}
+
+async function fetchBreakByAssignment(assignmentId) {
+    return await apiRequest(`/breaks/assignment/${assignmentId}`);
+}
+
+async function createBreak(data) {
+    return await apiRequest('/breaks', {
+        method: 'POST',
+        body: JSON.stringify(data)
+    });
+}
+
+async function deleteBreak(id) {
+    return await apiRequest(`/breaks/${id}`, {
+        method: 'DELETE'
+    });
+}
+
+// ============================================
+// BACKUP API
+// ============================================
+
+async function createBackup() {
+    return await apiRequest('/backup', {
+        method: 'POST'
+    });
 }

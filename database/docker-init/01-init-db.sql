@@ -1,0 +1,9 @@
+\i /sql/create_databases.sql
+\c storyland_foods
+\i /sql/create_location_disables.sql
+\i /sql/insert_foods_locations.sql
+\i /sql/additional_tables.sql
+\c storyland_retail
+\i /sql/create_location_disables.sql
+\i /sql/insert_retail_locations.sql
+\i /sql/additional_tables.sql
