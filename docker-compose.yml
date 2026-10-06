@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: storyland-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: tigresa015
+      POSTGRES_DB: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database:/sql:ro
+      - ./database/docker-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: storyland-backend
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: tigresa015
+      FOODS_DB_NAME: storyland_foods
+      RETAIL_DB_NAME: storyland_retail
+      PORT: 3001
+    volumes:
+      - ./backend/backups:/app/backups
+    ports:
+      - "3001:3001"
+      - "3002:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: storyland-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

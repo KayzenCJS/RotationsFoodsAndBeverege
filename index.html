@@ -8,6 +8,12 @@
     <link rel="stylesheet" href="style.css" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <script>
+        // Optional: set this to your deployed backend URL when frontend is hosted separately.
+        // Example: window.API_BASE_URL = 'https://your-backend.onrender.com/api';
+        // window.API_BASE_URL = 'https://your-backend.onrender.com/api';
+    </script>
+    <script src="api.js"></script>
 </head>
 <body>
     <!-- Header -->
@@ -22,10 +28,13 @@
                     <button class="lang-btn" data-lang="en">EN</button>
                 </div>
                 <ul class="nav-menu">
-                    <li class="nav-item"><a href="#inicio" class="nav-link">Inicio</a></li>
-                    <li class="nav-item"><a href="#servicios" class="nav-link">Locaciones</a></li>
-                    <li class="nav-item"><a href="#demo" class="nav-link">Demo</a></li>
-                    <li class="nav-item"><a href="#contacto" class="nav-link">Contacto</a></li>
+                    <li class="nav-item"><a href="#inicio" class="nav-link" onclick="updateStats()">Inicio</a></li>
+                    <li class="nav-item"><a href="#servicios" class="nav-link" onclick="switchType('foods')">Foods</a></li>
+                    <li class="nav-item"><a href="#servicios" class="nav-link" onclick="switchType('retail')">Retail</a></li>
+                    <li class="nav-item"><a href="#demo" class="nav-link" onclick="loadInitialData()">Gestión</a></li>
+                    <li class="nav-item"><a href="#tasks" class="nav-link" onclick="scrollToTasks(); refreshTasksPanel();">Tareas</a></li>
+                    <li class="nav-item"><a href="#" class="nav-link" onclick="openAdminPanel()">Admin</a></li>
+                    <li class="nav-item"><a href="#" class="nav-link" onclick="openWastelog()">Wastelog</a></li>
                 </ul>
                 <div class="nav-toggle">
                     <span class="bar"></span>
@@ -96,21 +105,94 @@
             </div>
 
             <!-- Employee Management -->
-            <div class="demo-section">
-                <div class="section-title">
-                    <h3><i class="fas fa-users"></i> Gestión de Empleados</h3>
-                    <button class="btn btn-primary" onclick="openEmployeeModal()"><i class="fas fa-plus"></i> Nuevo Empleado</button>
+            <div class="demo-section employee-management-section">
+                <div class="employee-admin-layout">
+                    <aside class="employee-sidebar">
+                        <h4>Employee Management</h4>
+                        <nav class="employee-sidebar-nav">
+                            <button class="employee-nav-item active" data-section="all" onclick="setEmployeeSection('all')"><i class="fas fa-users"></i> Employees</button>
+                            <button class="employee-nav-item" data-section="skills" onclick="setEmployeeSection('skills')"><i class="fas fa-tools"></i> Skills</button>
+                            <button class="employee-nav-item" data-section="certifications" onclick="setEmployeeSection('certifications')"><i class="fas fa-certificate"></i> Certifications</button>
+                            <button class="employee-nav-item" data-section="availability" onclick="setEmployeeSection('availability')"><i class="fas fa-calendar-alt"></i> Availability</button>
+                            <button class="employee-nav-item" data-section="service" onclick="setEmployeeSection('service')"><i class="fas fa-concierge-bell"></i> Service & Sales</button>
+                            <button class="employee-nav-item" data-section="retail" onclick="setEmployeeSection('retail')"><i class="fas fa-store"></i> Retail</button>
+                            <button class="employee-nav-item" data-section="history" onclick="setEmployeeSection('history')"><i class="fas fa-history"></i> History</button>
+                        </nav>
+                    </aside>
+
+                    <div class="employee-admin-main">
+                        <div class="section-title employee-admin-header">
+                            <div>
+                                <h3><i class="fas fa-users"></i> Gestión de Empleados</h3>
+                                <p class="employee-breadcrumb">Employee Management / Employees</p>
+                            </div>
+                            <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                                <span class="employee-count-badge" id="employeeCountBadge">0 empleados</span>
+                                <button class="btn btn-primary" onclick="openEmployeeModal()"><i class="fas fa-plus"></i> Nuevo Empleado</button>
+                                <button class="btn btn-secondary" onclick="refreshEmployeesPanel()" id="refreshEmployeesBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
+                            </div>
+                        </div>
+
+                        <div class="employee-toolbar">
+                            <input type="search" id="employeeSearch" placeholder="Buscar empleados..." oninput="filterEmployees()" />
+                            <select id="employeeRoleFilter" onchange="filterEmployees()">
+                                <option value="">Todos los roles</option>
+                                <option value="server">Server</option>
+                                <option value="cashier">Cashier</option>
+                                <option value="dishwasher">Dishwasher</option>
+                                <option value="cook">Cook</option>
+                                <option value="bartender">Bartender</option>
+                                <option value="assistant-supervisor">Assistant Supervisor</option>
+                                <option value="supervisor">Supervisor</option>
+                                <option value="op">OP</option>
+                            </select>
+                            <select id="employeeStatusFilter" onchange="filterEmployees()">
+                                <option value="">Todos los estados</option>
+                                <option value="available">Disponible</option>
+                                <option value="break">En Break</option>
+                                <option value="training">En Training</option>
+                                <option value="dayoff">Day Off</option>
+                                <option value="holiday">Festivo</option>
+                            </select>
+                            <select id="employeeTypeFilter" onchange="filterEmployees()">
+                                <option value="">Todos los departamentos</option>
+                                <option value="foods">Foods</option>
+                                <option value="retail">Retail</option>
+                            </select>
+                        </div>
+
+                        <div class="employee-table-container" id="employeesList"></div>
+                    </div>
                 </div>
-                <div class="employees-grid" id="employeesList"></div>
+            </div>
+
+            <!-- Employee Detail Modal -->
+            <div id="employeeDetailModal" class="modal">
+                <div class="modal-content employee-detail-content">
+                    <div class="modal-header">
+                        <h3 id="employeeDetailTitle">Detalles del Empleado</h3>
+                        <span class="close" onclick="closeEmployeeDetail()">&times;</span>
+                    </div>
+                    <div id="employeeDetailBody"></div>
+                </div>
             </div>
 
             <!-- Location Assignment -->
             <div class="demo-section">
                 <div class="section-title">
                     <h3><i class="fas fa-utensils"></i> Asignación a Locaciones</h3>
-                    <button class="btn btn-primary btn-large optimization-btn" onclick="optimizeAssignment()" style="background:linear-gradient(135deg,#10b981,#059669); border:none; padding:12px 24px; font-size:1rem;">
-                        <i class="fas fa-magic"></i> Asignar Automáticamente
-                    </button>
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <button class="btn btn-primary btn-large optimization-btn" onclick="optimizeAssignment()" style="background:linear-gradient(135deg,#10b981,#059669); border:none; padding:12px 24px; font-size:1rem;">
+                            <i class="fas fa-magic"></i> Asignar Automáticamente
+                        </button>
+                        <button class="btn btn-secondary" onclick="clearAssignmentsForDate()" id="clearAssignmentsBtn" style="border-color:#ef4444;color:#ef4444;">
+                            <i class="fas fa-trash"></i> Borrar Asignaciones del Día
+                        </button>
+                        <button class="btn btn-secondary" onclick="openSupervisorAssignmentModal()">
+                            <i class="fas fa-user-tie"></i> Asignar Supervisores
+                        </button>
+                        <button class="btn btn-secondary" onclick="refreshAssignmentsPanel()" id="refreshAssignmentsBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
+                    </div>
                 </div>
                 <div class="optimization-content">
                     <div class="day-selector">
@@ -118,10 +200,62 @@
                         <input type="date" id="workDate" />
                     </div>
                     <div class="locations-requirements">
-                        <h4>Locaciones del Parque</h4>
+                        <h4>Locaciones del Parque (Asignación Operativa)</h4>
+                        <p style="font-size:0.85rem;color:#6b7280;margin-bottom:1rem;">Un empleado no puede estar asignado operativamente en múltiples locaciones simultáneamente en el mismo horario.</p>
                         <div class="locations-grid" id="locationsGrid"></div>
                     </div>
                     <div class="optimization-results" id="optimizationResults"></div>
+                </div>
+            </div>
+
+            <!-- Assignment History -->
+            <div class="demo-section">
+                <div class="section-title">
+                    <h3><i class="fas fa-history"></i> Historial de Asignaciones</h3>
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <input type="date" id="historyDate" style="padding:0.5rem; border:1px solid #e2e8f0; border-radius:8px;" />
+                        <button class="btn btn-primary" onclick="loadAssignmentHistory()"><i class="fas fa-search"></i> Ver Historial</button>
+                        <button class="btn btn-secondary" onclick="printAssignmentHistory()"><i class="fas fa-print"></i> Imprimir</button>
+                        <button class="btn btn-secondary" onclick="refreshHistoryPanel()" id="refreshHistoryBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
+                    </div>
+                </div>
+                <div class="history-content" id="historyContent">
+                    <p style="text-align:center;color:#6b7280;">Selecciona una fecha para ver el historial de asignaciones</p>
+                </div>
+            </div>
+
+            <!-- Location Management -->
+            <div class="demo-section" style="display:none;" id="adminLocationsSection">
+                <div class="section-title">
+                    <h3><i class="fas fa-store-slash"></i> Gestión de Locaciones</h3>
+                    <button class="btn btn-secondary" onclick="refreshLocationManagementPanel()" id="refreshLocationManagementBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
+                </div>
+                <div class="locations-management">
+                    <div class="day-selector">
+                        <label>Fecha:</label>
+                        <input type="date" id="managementDate" />
+                    </div>
+                    <div class="locations-grid" id="managementGrid"></div>
+                </div>
+            </div>
+
+            <!-- Closure History -->
+            <div class="demo-section" style="display:none;" id="adminClosureHistorySection">
+                <div class="section-title">
+                    <h3><i class="fas fa-store-slash"></i> Registro de Locaciones Cerradas</h3>
+                    <button class="btn btn-secondary" onclick="refreshClosureHistoryPanel()" id="refreshClosureHistoryBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
+                </div>
+                <div class="locations-management">
+                    <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:1rem;">
+                        <input type="date" id="closureHistoryDate" placeholder="Fecha" onchange="filterClosureHistory()" />
+                        <select id="closureHistoryLocation" onchange="filterClosureHistory()">
+                            <option value="">Todas las locaciones</option>
+                        </select>
+                        <input type="text" id="closureHistoryUser" placeholder="Buscar por usuario..." oninput="filterClosureHistory()" />
+                    </div>
+                    <div class="closure-history-container" id="closureHistoryContainer">
+                        <p style="text-align:center;color:#6b7280;">Cargando registro...</p>
+                    </div>
                 </div>
             </div>
 
@@ -131,16 +265,34 @@
                     <h3><i class="fas fa-search"></i> Consultas Inteligentes</h3>
                 </div>
                 <div class="query-area">
-                    <div class="query-input">
-                        <input type="text" id="queryInput" placeholder="Buscar por habilidad, área o nombre..." />
-                        <button class="btn btn-primary" onclick="processQuery()"><i class="fas fa-paper-plane"></i> Consultar</button>
+                    <div class="query-tabs">
+                        <button class="query-tab active" onclick="switchQueryTab('employees')">Por Empleado</button>
+                        <button class="query-tab" onclick="switchQueryTab('locations')">Por Locación</button>
                     </div>
-                    <div class="quick-queries">
-                        <button class="quick-query-btn" onclick="quickQuery('comida')"><i class="fas fa-utensils"></i> Comida</button>
-                        <button class="quick-query-btn" onclick="quickQuery('tienda')"><i class="fas fa-store"></i> Tienda</button>
-                        <button class="quick-query-btn" onclick="quickQuery('cafe')"><i class="fas fa-coffee"></i> Café</button>
-                        <button class="quick-query-btn" onclick="quickQuery('souvenirs')"><i class="fas fa-gift"></i> Souvenirs</button>
+
+                    <div id="employeeQueryTab">
+                        <div class="query-input">
+                            <input type="text" id="queryInput" placeholder="Buscar por habilidad, área o nombre..." />
+                            <button class="btn btn-primary" onclick="processQuery()"><i class="fas fa-paper-plane"></i> Consultar</button>
+                        </div>
+                        <div class="quick-queries">
+                            <button class="quick-query-btn" onclick="quickQuery('comida')"><i class="fas fa-utensils"></i> Comida</button>
+                            <button class="quick-query-btn" onclick="quickQuery('tienda')"><i class="fas fa-store"></i> Tienda</button>
+                            <button class="quick-query-btn" onclick="quickQuery('cafe')"><i class="fas fa-coffee"></i> Café</button>
+                            <button class="quick-query-btn" onclick="quickQuery('souvenirs')"><i class="fas fa-gift"></i> Souvenirs</button>
+                        </div>
                     </div>
+
+                    <div id="locationQueryTab" style="display:none;">
+                        <div class="query-input">
+                            <select id="locationQuerySelect" style="flex:1; padding:0.75rem; border-radius:8px; border:1px solid #d1d5db;">
+                                <option value="">Seleccionar locación...</option>
+                                ${locations.map(loc => `<option value="${loc.id}">${loc.name}</option>`).join('')}
+                            </select>
+                            <button class="btn btn-primary" onclick="queryByLocation()"><i class="fas fa-paper-plane"></i> Consultar</button>
+                        </div>
+                    </div>
+
                     <div class="query-results" id="queryResults"></div>
                 </div>
             </div>
@@ -149,7 +301,10 @@
             <div class="demo-section">
                 <div class="section-title">
                     <h3><i class="fas fa-tasks"></i> Gestión de Tareas</h3>
-                    <button class="btn btn-primary" onclick="openTaskModal()"><i class="fas fa-plus"></i> Nueva Tarea</button>
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <button class="btn btn-primary" onclick="openTaskModal()"><i class="fas fa-plus"></i> Nueva Tarea</button>
+                        <button class="btn btn-secondary" onclick="refreshTasksPanel()" id="refreshTasksBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
+                    </div>
                 </div>
                 <div class="task-area">
                     <div class="task-filters">
@@ -165,34 +320,17 @@
                             <option value="in-progress">En Progreso</option>
                             <option value="completed">Completadas</option>
                         </select>
+                        <select id="taskCategoryFilter" onchange="filterTasks()">
+                            <option value="">Todas las Categorías</option>
+                            <option value="maintenance">🔧 Mantenimiento</option>
+                            <option value="cleaning">🧹 Limpieza</option>
+                            <option value="training">📚 Capacitación</option>
+                            <option value="customer-service">👥 Servicio al Cliente</option>
+                            <option value="other">📋 Otro</option>
+                        </select>
+                        <input type="date" id="taskDateFilter" onchange="filterTasks()" placeholder="Fecha específica" style="padding:0.5rem; border:1px solid #d1d5db; border-radius:8px;" />
                     </div>
                     <div class="task-list" id="taskList"></div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Contact Section -->
-    <section id="contacto" class="contact">
-        <div class="container">
-            <div class="contact-content">
-                <div class="contact-info">
-                    <h2>¿Listo para optimizar tu operación?</h2>
-                    <p>Sistema de gestión diseñado específicamente para las locaciones de StoryLand NH.</p>
-                    <div class="contact-methods">
-                        <div class="contact-method"><i class="fas fa-envelope"></i><div><h4>Email</h4><p>info@storymanager.com</p></div></div>
-                        <div class="contact-method"><i class="fas fa-phone"></i><div><h4>Teléfono</h4><p>+1 (603) 555-0123</p></div></div>
-                        <div class="contact-method"><i class="fas fa-map-marker-alt"></i><div><h4>Ubicación</h4><p>Story Land, Glen NH 03838</p></div></div>
-                    </div>
-                </div>
-                <div class="contact-form">
-                    <form id="contactForm">
-                        <div class="form-group"><input type="text" id="name" placeholder="Tu Nombre" required /></div>
-                        <div class="form-group"><input type="email" id="email" placeholder="Tu Email" required /></div>
-                        <div class="form-group"><input type="text" id="company" placeholder="Tu Parque o Empresa" /></div>
-                        <div class="form-group"><textarea id="message" placeholder="Cuéntanos sobre tus necesidades..." rows="4" required></textarea></div>
-                        <button type="submit" class="btn btn-primary btn-full">Enviar Mensaje</button>
-                    </form>
                 </div>
             </div>
         </div>
@@ -205,7 +343,7 @@
                 <div class="footer-brand"><h3>Story<span>Manager</span></h3><p>Gestión de personal para StoryLand NH.</p></div>
                 <div class="footer-links">
                     <div class="footer-column"><h4>Locaciones</h4><ul><li><a href="#servicios">Restaurantes</a></li><li><a href="#servicios">Tiendas</a></li></ul></div>
-                    <div class="footer-column"><h4>Empresa</h4><ul><li><a href="#inicio">Inicio</a></li><li><a href="#demo">Demo</a></li><li><a href="#contacto">Contacto</a></li></ul></div>
+                    <div class="footer-column"><h4>Empresa</h4><ul><li><a href="#inicio">Inicio</a></li><li><a href="#demo">Demo</a></li></ul></div>
                 </div>
             </div>
             <div class="footer-bottom"><p>&copy; 2025 StoryManager. Todos los derechos reservados.</p></div>
@@ -220,46 +358,239 @@
                 <div class="form-content">
                     <div class="form-row">
                         <div class="form-group"><label>Nombre</label><input type="text" id="empName" required /></div>
-                        <div class="form-group"><label>Nacionalidad</label><input type="text" id="empNationality" required /></div>
+                        <div class="form-group"><label>Nacionalidad</label>
+                            <select id="empNationality" required>
+                                <option value="">Seleccionar...</option>
+                                <optgroup label="América del Norte">
+                                    <option value="Estadounidense">Estadounidense</option>
+                                    <option value="Canadiense">Canadiense</option>
+                                    <option value="Mexicana">Mexicana</option>
+                                </optgroup>
+                                <optgroup label="América Central">
+                                    <option value="Guatemalteca">Guatemalteca</option>
+                                    <option value="Beliceña">Beliceña</option>
+                                    <option value="Salvadoreña">Salvadoreña</option>
+                                    <option value="Hondureña">Hondureña</option>
+                                    <option value="Nicaragüense">Nicaragüense</option>
+                                    <option value="Costarricense">Costarricense</option>
+                                    <option value="Panameña">Panameña</option>
+                                </optgroup>
+                                <optgroup label="América del Sur">
+                                    <option value="Argentina">Argentina</option>
+                                    <option value="Boliviana">Boliviana</option>
+                                    <option value="Brasileña">Brasileña</option>
+                                    <option value="Chilena">Chilena</option>
+                                    <option value="Colombiana">Colombiana</option>
+                                    <option value="Ecuatoriana">Ecuatoriana</option>
+                                    <option value="Guyanesa">Guyanesa</option>
+                                    <option value="Paraguaya">Paraguaya</option>
+                                    <option value="Peruana">Peruana</option>
+                                    <option value="Surinamesa">Surinamesa</option>
+                                    <option value="Uruguaya">Uruguaya</option>
+                                    <option value="Venezolana">Venezolana</option>
+                                </optgroup>
+                                <optgroup label="El Caribe">
+                                    <option value="Cubana">Cubana</option>
+                                    <option value="Dominicana">Dominicana</option>
+                                    <option value="Puertorriqueña">Puertorriqueña</option>
+                                    <option value="Jamaicana">Jamaicana</option>
+                                    <option value="Haitiana">Haitiana</option>
+                                    <option value="Trinitense">Trinitense</option>
+                                    <option value="Barbadense">Barbadense</option>
+                                </optgroup>
+                                <optgroup label="Europa">
+                                    <option value="Española">Española</option>
+                                    <option value="Francesa">Francesa</option>
+                                    <option value="Alemana">Alemana</option>
+                                    <option value="Italiana">Italiana</option>
+                                    <option value="Portuguesa">Portuguesa</option>
+                                    <option value="Británica">Británica</option>
+                                    <option value="Irlandesa">Irlandesa</option>
+                                    <option value="Holandesa">Holandesa</option>
+                                    <option value="Belga">Belga</option>
+                                    <option value="Suiza">Suiza</option>
+                                    <option value="Austriaca">Austriaca</option>
+                                    <option value="Polaca">Polaca</option>
+                                    <option value="Rumana">Rumana</option>
+                                    <option value="Rusa">Rusa</option>
+                                    <option value="Ucraniana">Ucraniana</option>
+                                    <option value="Griega">Griega</option>
+                                    <option value="Turca">Turca</option>
+                                </optgroup>
+                                <optgroup label="Asia">
+                                    <option value="China">China</option>
+                                    <option value="Japonesa">Japonesa</option>
+                                    <option value="Coreana">Coreana</option>
+                                    <option value="Filipina">Filipina</option>
+                                    <option value="Vietnamita">Vietnamita</option>
+                                    <option value="Tailandesa">Tailandesa</option>
+                                    <option value="India">India</option>
+                                    <option value="Paquistaní">Paquistaní</option>
+                                    <option value="Indonesia">Indonesia</option>
+                                    <option value="Malaya">Malaya</option>
+                                </optgroup>
+                                <optgroup label="África">
+                                    <option value="Sudafricana">Sudafricana</option>
+                                    <option value="Nigeriana">Nigeriana</option>
+                                    <option value="Keniata">Keniata</option>
+                                    <option value="Ghanesa">Ghanesa</option>
+                                    <option value="Egipcia">Egipcia</option>
+                                    <option value="Marroquí">Marroquí</option>
+                                </optgroup>
+                                <optgroup label="Oceanía">
+                                    <option value="Australiana">Australiana</option>
+                                    <option value="Neozelandesa">Neozelandesa</option>
+                                </optgroup>
+                                <option value="Otra">Otra</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group"><label>Edad</label><input type="number" id="empAge" min="18" max="65" required /></div>
-                        <div class="form-group"><label>Área</label>
-                            <select id="empArea" required>
+                        <div class="form-group"><label>Edad</label><input type="number" id="empAge" min="16" max="65" required /></div>
+                        <div class="form-group"><label>Fecha de Ingreso</label><input type="date" id="empHireDate" required /></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Rol</label>
+                            <select id="empRole" required>
                                 <option value="">Seleccionar...</option>
-                                <option value="food-beverage">Comida y Bebida</option>
-                                <option value="retail">Ventas / Tienda</option>
-                                <option value="customer-service">Servicio al Cliente</option>
-                                <option value="cleaning">Limpieza</option>
-                                <option value="security">Seguridad</option>
+                                <option value="server">Server</option>
+                                <option value="cashier">Cashier</option>
+                                <option value="dishwasher">Dishwasher</option>
+                                <option value="cook">Cook</option>
+                                <option value="bartender">Bartender</option>
+                                <option value="assistant-supervisor">Assistant Supervisor</option>
+                                <option value="supervisor">Supervisor</option>
+                                <option value="op">OP</option>
+                            </select>
+                        </div>
+                        <div class="form-group"><label>Grupo</label>
+                            <select id="empGroup" required>
+                                <option value="">Seleccionar...</option>
+                                <option value="A">Grupo A - Frente del parque (Pixie Kitchen, Food Fair, Oasis, Slush Factory)</option>
+                                <option value="B">Grupo B - Medio del parque (Guard House, Dutch Village, Poblano Cantina, World Pavilion, Teddy's Oasis)</option>
+                                <option value="C">Grupo C - Fondo del parque (Barnyard Pizza, Dippin' Dots, Farm Stand)</option>
                             </select>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Habilidades / Capacitaciones</label>
                         <div class="trainings-container">
-                            <div class="training-category"><h5>Comida y Bebida</h5>
+                            <div class="training-category">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                                    <h5>🍔 Capacitaciones Food & Beverage</h5>
+                                    <button type="button" class="btn btn-sm btn-secondary" onclick="toggleCheckboxes(this)">Select All</button>
+                                </div>
                                 <div class="checkbox-group">
-                                    <label><input type="checkbox" value="food-beverage" /> Comida y Bebida</label>
-                                    <label><input type="checkbox" value="vegetarian" /> Opciones Vegetarianas</label>
-                                    <label><input type="checkbox" value="pizza" /> Preparación de Pizza</label>
-                                    <label><input type="checkbox" value="cafe" /> Café / Barista</label>
+                                    <label><input type="checkbox" value="dunkin-trained" /> Dunkin' Certified</label>
+                                    <label><input type="checkbox" value="food-safety" /> Food Safety / Food Handling</label>
+                                    <label><input type="checkbox" value="pos-training" /> Cash Register / POS Training</label>
+                                    <label><input type="checkbox" value="fryer-training" /> Fryer Training</label>
+                                    <label><input type="checkbox" value="grill-training" /> Grill Training</label>
+                                    <label><input type="checkbox" value="griddle-training" /> Griddle Training</label>
+                                    <label><input type="checkbox" value="food-warmer-training" /> Food Warmer Training</label>
+                                    <label><input type="checkbox" value="soda-fountain-training" /> Soda Fountain Training</label>
+                                    <label><input type="checkbox" value="dippin-dots-training" /> Dippin' Dots Training</label>
+                                    <label><input type="checkbox" value="lemonade-training" /> Lemonade Station Training</label>
+                                    <label><input type="checkbox" value="pizza-prep-training" /> Pizza Preparation</label>
+                                    <label><input type="checkbox" value="oven-training" /> Oven Training</label>
+                                    <label><input type="checkbox" value="dough-training" /> Dough / Food Preparation</label>
+                                    <label><input type="checkbox" value="ice-cream-training" /> Ice Cream Machine Training</label>
+                                    <label><input type="checkbox" value="sundae-training" /> Sundae Preparation</label>
+                                    <label><input type="checkbox" value="icee-training" /> ICEE / Slush Machine</label>
+                                    <label><input type="checkbox" value="sandwich-training" /> Sandwich Prep</label>
+                                    <label><input type="checkbox" value="freezer-training" /> Freezer Handling</label>
                                 </div>
                             </div>
-                            <div class="training-category"><h5>Servicio y Ventas</h5>
+                            <div class="training-category">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                                    <h5>🔧 Habilidades Operativas</h5>
+                                    <button type="button" class="btn btn-sm btn-secondary" onclick="toggleCheckboxes(this)">Select All</button>
+                                </div>
+                                <div class="checkbox-group">
+                                    <label><input type="checkbox" value="operate-fryer" /> Operar Fryer</label>
+                                    <label><input type="checkbox" value="filter-oil" /> Filtrar/Cambiar Aceite</label>
+                                    <label><input type="checkbox" value="clean-fryer" /> Limpiar Fryer</label>
+                                    <label><input type="checkbox" value="clean-grill" /> Limpiar Grill</label>
+                                    <label><input type="checkbox" value="clean-griddle" /> Limpiar Griddle</label>
+                                    <label><input type="checkbox" value="prep-burgers" /> Preparar Burgers</label>
+                                    <label><input type="checkbox" value="prep-tenders" /> Preparar Tenders</label>
+                                    <label><input type="checkbox" value="prep-grilled-cheese" /> Preparar Grilled Cheese</label>
+                                    <label><input type="checkbox" value="prep-cheese-curds" /> Preparar Cheese Curds</label>
+                                    <label><input type="checkbox" value="prep-onion-rings" /> Preparar Onion Rings</label>
+                                    <label><input type="checkbox" value="prep-tater-kegs" /> Preparar Tater Kegs</label>
+                                    <label><input type="checkbox" value="prep-fries" /> Preparar Fries</label>
+                                    <label><input type="checkbox" value="prep-lemonade" /> Preparar Fresh-Squeezed Lemonade</label>
+                                    <label><input type="checkbox" value="handle-dippin-dots" /> Manejar Dippin' Dots</label>
+                                    <label><input type="checkbox" value="prep-beverages" /> Preparar Bebidas</label>
+                                    <label><input type="checkbox" value="clean-beverage-machine" /> Limpieza Máquina Bebidas</label>
+                                    <label><input type="checkbox" value="sanitize-surfaces" /> Sanitización de Superficies</label>
+                                    <label><input type="checkbox" value="wash-utensils" /> Lavado de Utensilios</label>
+                                    <label><input type="checkbox" value="dishwashing" /> Dishwashing</label>
+                                    <label><input type="checkbox" value="restocking" /> Restocking</label>
+                                    <label><input type="checkbox" value="prep-pizzas" /> Preparar Pizzas</label>
+                                    <label><input type="checkbox" value="operate-oven" /> Operar Horno</label>
+                                    <label><input type="checkbox" value="cut-pizza" /> Cortar Pizza</label>
+                                    <label><input type="checkbox" value="prep-toppings" /> Preparar Toppings</label>
+                                    <label><input type="checkbox" value="handle-dough" /> Manejar Dough</label>
+                                    <label><input type="checkbox" value="cooking-times" /> Controlar Tiempos de Cocción</label>
+                                    <label><input type="checkbox" value="maintain-food-warmer" /> Mantener Food Warmer</label>
+                                    <label><input type="checkbox" value="clean-oven" /> Limpiar Horno</label>
+                                    <label><input type="checkbox" value="clean-prep-area" /> Limpiar Área de Preparación</label>
+                                    <label><input type="checkbox" value="prep-snacks" /> Preparación de Snacks</label>
+                                    <label><input type="checkbox" value="handle-popcorn" /> Manejar Popcorn/Snack Equipment</label>
+                                    <label><input type="checkbox" value="deep-cleaning" /> Limpieza Profunda</label>
+                                    <label><input type="checkbox" value="handle-ice-cream-machine" /> Manejar Máquina de Helado</label>
+                                    <label><input type="checkbox" value="serve-soft-serve" /> Servir Soft-Serve</label>
+                                    <label><input type="checkbox" value="prep-sundaes" /> Preparar Sundaes</label>
+                                    <label><input type="checkbox" value="handle-toppings" /> Manejar Toppings</label>
+                                    <label><input type="checkbox" value="disassemble-ice-cream" /> Desarmar/Limpiar Componentes</label>
+                                    <label><input type="checkbox" value="sanitize-ice-cream-area" /> Sanitizar Área de Helados</label>
+                                    <label><input type="checkbox" value="handle-cones-cups" /> Manejar Conos y Cups</label>
+                                    <label><input type="checkbox" value="operate-slush-machines" /> Operar Máquinas de Slush</label>
+                                    <label><input type="checkbox" value="prep-icee" /> Preparar/Refill ICEE</label>
+                                    <label><input type="checkbox" value="change-flavors" /> Cambiar Sabores</label>
+                                    <label><input type="checkbox" value="clean-slush-machines" /> Limpiar Máquinas</label>
+                                    <label><input type="checkbox" value="sanitize-nozzles" /> Sanitizar Nozzles</label>
+                                    <label><input type="checkbox" value="prep-souvenir-cups" /> Preparar Souvenir Cups</label>
+                                    <label><input type="checkbox" value="handle-refills" /> Manejar Refills</label>
+                                    <label><input type="checkbox" value="control-ice" /> Controlar Hielo/Bebidas</label>
+                                    <label><input type="checkbox" value="serve-dippin-dots" /> Servir Dippin' Dots</label>
+                                    <label><input type="checkbox" value="handle-freezer" /> Manejar Freezer</label>
+                                    <label><input type="checkbox" value="control-flavors" /> Controlar Sabores</label>
+                                    <label><input type="checkbox" value="clean-freezer" /> Limpieza de Freezer</label>
+                                    <label><input type="checkbox" value="prep-sandwiches" /> Preparar Sandwiches</label>
+                                    <label><input type="checkbox" value="prep-tornado-potatoes" /> Preparar Tornado Potatoes</label>
+                                </div>
+                            </div>
+                            <div class="training-category">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                                    <h5>Servicio y Ventas</h5>
+                                    <button type="button" class="btn btn-sm btn-secondary" onclick="toggleCheckboxes(this)">Select All</button>
+                                </div>
                                 <div class="checkbox-group">
                                     <label><input type="checkbox" value="customer-service" /> Servicio al Cliente</label>
                                     <label><input type="checkbox" value="retail" /> Ventas / Retail</label>
                                     <label><input type="checkbox" value="souvenirs" /> Souvenirs / Merchandising</label>
+                                    <label><input type="checkbox" value="nh-alcohol-certification" /> 🍺 Certificación Alcohol NH</label>
                                 </div>
                             </div>
-                            <div class="training-category"><h5>Limpieza y Seguridad</h5>
+                            <div class="training-category">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                                    <h5>Limpieza y Seguridad (Food & Beverage)</h5>
+                                    <button type="button" class="btn btn-sm btn-secondary" onclick="toggleCheckboxes(this)">Select All</button>
+                                </div>
                                 <div class="checkbox-group">
-                                    <label><input type="checkbox" value="bathroom-cleaning" /> Limpieza de Baños</label>
-                                    <label><input type="checkbox" value="parking-cleaning" /> Limpieza de Parking</label>
-                                    <label><input type="checkbox" value="security" /> Seguridad</label>
-                                    <label><input type="checkbox" value="first-aid" /> Primeros Auxilios</label>
-                                    <label><input type="checkbox" value="bag-check" /> Bag Check</label>
+                                    <label><input type="checkbox" value="mop-floors" /> Trapear pisos</label>
+                                    <label><input type="checkbox" value="clean-grill" /> Limpiar la grill</label>
+                                    <label><input type="checkbox" value="clean-work-surfaces" /> Limpiar superficies de trabajo</label>
+                                    <label><input type="checkbox" value="clean-ice-cream-machine" /> Limpiar la máquina de helado</label>
+                                    <label><input type="checkbox" value="change-cooking-oil" /> Filtrar/cambiar el aceite de cocina</label>
+                                    <label><input type="checkbox" value="clean-cooking-equipment" /> Limpiar equipos de cocina</label>
+                                    <label><input type="checkbox" value="restock-supplies" /> Reponer suministros</label>
+                                    <label><input type="checkbox" value="clean-prep-area" /> Limpieza de áreas de preparación</label>
+                                    <label><input type="checkbox" value="wash-utensils" /> Manejo y limpieza de utensilios</label>
+                                    <label><input type="checkbox" value="clean-fryers" /> Limpieza de freidoras</label>
+                                    <label><input type="checkbox" value="closing-cleanup" /> Limpieza al cierre de la location</label>
                                 </div>
                             </div>
                         </div>
@@ -285,8 +616,7 @@
                         <div class="form-group"><label>Asignar a</label><select id="taskAssignedTo" required></select></div>
                         <div class="form-group"><label>Prioridad</label>
                             <select id="taskPriority" required>
-                                <option value="low">Baja</option><option value="medium">Media</option>
-                                <option value="high">Alta</option><option value="urgent">Urgente</option>
+                                <option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option><option value="urgent">Urgente</option>
                             </select>
                         </div>
                     </div>
@@ -294,10 +624,14 @@
                         <div class="form-group"><label>Fecha Límite</label><input type="date" id="taskDueDate" required /></div>
                         <div class="form-group"><label>Categoría</label>
                             <select id="taskCategory" required>
-                                <option value="maintenance">Mantenimiento</option>
-                                <option value="cleaning">Limpieza</option>
-                                <option value="training">Capacitación</option>
-                                <option value="customer-service">Servicio al Cliente</option>
+                                <option value="maintenance">🔧 Mantenimiento</option>
+                                <option value="cleaning">🧹 Limpieza</option>
+                                <option value="training">📚 Capacitación</option>
+                                <option value="customer-service">👥 Servicio al Cliente</option>
+                                <option value="equipment">⚙️ Equipos</option>
+                                <option value="supplies">📦 Suministros</option>
+                                <option value="safety">⚠️ Seguridad</option>
+                                <option value="other">📋 Otro</option>
                                 <option value="other">Otro</option>
                             </select>
                         </div>
