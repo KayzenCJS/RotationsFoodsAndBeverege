@@ -223,6 +223,52 @@ const EXPECTED = {
   if (contadoresMal) { console.log('  ATENCION: ' + contadoresMal + ' hallazgo(s) con el contador de correcciones desfasado'); bad++; }
   else console.log('  ok   contadores de correcciones al día');
 
+  // ------------------------------------------------------------------------
+  //  Inspectores: entidad propia, separada de los empleados.
+  // ------------------------------------------------------------------------
+  console.log('\n=== Inspectores ===');
+
+  // 1) Ningun inspector puede coincidir con un empleado. Si coincidiera, el campo
+  //    habria vuelto a mirar la tabla de empleados por la puerta de atras.
+  const solapados = (await p.query(
+    `SELECT count(*)::int n FROM inspectors x
+      WHERE EXISTS (SELECT 1 FROM employees e WHERE lower(btrim(e.name)) = lower(btrim(x.name)))`)).rows[0].n;
+  if (solapados) { console.log('  ATENCION: ' + solapados + ' inspector(es) con el mismo nombre que un empleado'); bad++; }
+  else console.log('  ok   ningun inspector coincide con un empleado');
+
+  // 2) Duplicados por mayusculas o espacios: el indice unico lo impide, pero se
+  //    comprueba por si el indice se llegara a quitar.
+  const inspectoresDupes = (await p.query(
+    `SELECT count(*)::int n FROM (
+       SELECT lower(btrim(name)) FROM inspectors GROUP BY lower(btrim(name)) HAVING count(*) > 1
+     ) d`)).rows[0].n;
+  if (inspectoresDupes) { console.log('  ATENCION: ' + inspectoresDupes + ' inspector(es) duplicado(s)'); bad++; }
+  else console.log('  ok   sin inspectores duplicados');
+
+  // 3) Toda inspeccion con inspector registrado debe tener su nombre guardado.
+  //    Las antiguas pueden no tenerlo: es lo que se conserva tal cual.
+  const sinNombre = (await p.query(
+    `SELECT count(*)::int n FROM inspections i
+      WHERE i.inspector_id IS NOT NULL
+        AND (i.inspector_name IS NULL OR btrim(i.inspector_name) = '')
+        AND EXISTS (SELECT 1 FROM inspectors x WHERE x.id = i.inspector_id)`)).rows[0].n;
+  if (sinNombre) { console.log('  ATENCION: ' + sinNombre + ' inspeccion(es) con inspector registrado pero sin nombre guardado'); bad++; }
+  else console.log('  ok   toda inspeccion con inspector registrado tiene su nombre');
+
+  // 4) La serie de ids nunca puede pisar un id de la epoca de los empleados.
+  const maxHuerfano = (await p.query(
+    `SELECT count(*)::int n, COALESCE(max(i.inspector_id), 0) AS mx FROM inspections i
+      WHERE i.inspector_id IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM inspectors x WHERE x.id = i.inspector_id)`)).rows[0];
+  const siguiente = (await p.query(
+    `SELECT CASE WHEN is_called THEN last_value + 1 ELSE last_value END AS n FROM inspectors_id_seq`)).rows[0].n;
+  console.log('  ---  inspecciones con ID de inspector de la epoca de los empleados (conservadas): ' + maxHuerfano.n);
+  console.log('  ---  siguiente ID de inspector que se generara: ' + siguiente);
+  if (siguiente <= maxHuerfano.mx) {
+    console.log('  ATENCION: un inspector nuevo podria coincidir con un ID historico');
+    bad++;
+  } else console.log('  ok   la serie esta por encima de todos los IDs historicos');
+
   console.log('\n=== 10 cualidades retiradas ===');
   const retiro = (await p.query(
     `SELECT count(*)::int n FROM employee_trainings WHERE training_name = ANY($1)`,

@@ -21,7 +21,7 @@ const insp = {
     tipos: [],            // catalogo de tipos de inspeccion
     categorias: [],       // catalogo de categorias de hallazgo
     responsables: [],     // empleados que pueden atender un problema
-    asignables: [],       // empleados (para buscar por nombre y apellido)
+    inspectores: [],      // registro de inspectores (NO son empleados)
     locPorInspeccion: [], // inspections-by-location (el panel)
     editandoHallazgo: null,
     editandoCorreccion: null
@@ -43,16 +43,20 @@ async function cargarCatalogosInspecciones() {
         return r.ok ? r.json() : [];
     };
     try {
-        const [tipos, categorias, responsables, asignables] = await Promise.all([
+        // /inspectors va aparte a proposito: es el registro de inspectores, que
+        // no tiene nada que ver con la tabla de empleados. /inspection-assignees
+        // sigue siendo la lista de empleados, y solo se usa para los
+        // responsables de hallazgos y correcciones.
+        const [tipos, categorias, responsables, inspectores] = await Promise.all([
             pedir('/inspection-types'),
             pedir('/finding-categories'),
             pedir('/inspection-assignees'),
-            pedir('/inspection-assignees')
+            pedir('/inspectors')
         ]);
         insp.tipos = tipos || [];
         insp.categorias = categorias || [];
         insp.responsables = responsables || [];
-        insp.asignables = asignables || [];
+        insp.inspectores = inspectores || [];
     } catch (e) {
         console.error('No se pudieron cargar los catálogos de inspecciones:', e);
     }
@@ -122,19 +126,29 @@ async function openInspectionModal(inspeccion) {
         : ahora.toTimeString().slice(0, 5);
     notas.value = inspeccion ? (inspeccion.general_notes || '') : '';
 
-    // --- Inspector: combobox de empleados, con opcion de escribir uno externo
+    // --- Inspector
+    //
+    // Los inspectores NO son los empleados del Gestor de Empleados. Las opciones
+    // salen del registro de inspectores (/inspectors), no de la lista de
+    // empleados, y no se muestran ni sus ids ni sus cargos. El campo admite
+    // escribir un nombre que no esté en la lista: el alta la hace el servidor
+    // al guardar, con un id que genera la base de datos.
     const cInsp = InspectorCombo.crear(
         document.getElementById('inspectionInspectorBox'),
-        insp.responsables.map(e => ({ id: e.id, label: e.name, sub: getRoleName(e.role), meta: e.name })),
+        opcionesInspectores(),
         { oculto: document.getElementById('inspectionInspector'),
           placeholder: t('insp.searchInspector'), permiteLibre: true }
     );
     if (inspeccion) {
-        const nombre = inspeccion.inspector_name_resuelta || inspeccion.inspector_name;
-        if (inspeccion.inspector_id && await nombreDeInspector(inspeccion.inspector_id)) {
+        // Se muestra el nombre guardado en la propia inspección, que es la foto
+        // del momento en que se hizo. Si esta en el registro, se selecciona su
+        // ficha; si no, se deja el nombre escrito tal cual.
+        const nombre = inspeccion.inspector_name || '';
+        if (inspeccion.inspector_id
+            && insp.inspectores.some(x => x.id === inspeccion.inspector_id)) {
             cInsp.setValue(inspeccion.inspector_id);
-        } else {
-            cInsp.setValue(null, nombre || (inspeccion.inspector_id ? String(inspeccion.inspector_id) : ''));
+        } else if (nombre) {
+            cInsp.setValue(null, nombre);
         }
     }
 
@@ -165,15 +179,23 @@ async function openInspectionModal(inspeccion) {
     document.getElementById('inspectionModal').style.display = 'block';
 }
 
+// Opciones del combobox de inspectores, con lo mínimo para distinguirlos: su
+// nombre y cuantas inspecciones llevan. Ni el id ni el cargo, porque no tienen
+// nada que ver con los empleados.
+function opcionesInspectores() {
+    return (insp.inspectores || []).map(x => ({
+        id: x.id,
+        label: x.name,
+        sub: x.inspecciones
+            ? t('insp.inspectorUses', { n: x.inspecciones })
+            : t('insp.inspectorNeverUsed'),
+        meta: x.name
+    }));
+}
+
 function nombreTipo(x) {
     if (!x) return '';
     return (currentLang === 'en' ? (x.name_en || x.name_es) : x.name_es) || x.key;
-}
-
-async function nombreDeInspector(id) {
-    if (!id) return null;
-    const e = insp.responsables.find(x => x.id === Number(id));
-    return e ? e.name : null;
 }
 
 function closeInspectionModal() {
@@ -231,18 +253,21 @@ document.getElementById('inspectionForm')?.addEventListener('submit', async func
     if (!fecha) { showNotification(t('insp.dateRequired'), 'error'); return; }
     if (!tipo) { showNotification(t('insp.typeRequired'), 'error'); return; }
     if (!locacion) { showNotification(t('insp.locationRequired'), 'error'); return; }
-    if (!inspectorId && !inspectorTexto) { showNotification(t('insp.inspectorRequired'), 'error'); return; }
+    // El inspector se escribe, no se busca entre empleados. Se acepta un
+    // nombre libre; si ademas viene un id es porque se eligio a alguien que ya
+    // estaba en el registro de inspectores.
+    if (!inspectorTexto) { showNotification(t('insp.inspectorRequired'), 'error'); return; }
 
     const payload = {
         inspection_date: fecha,
         inspection_time: hora || null,
         inspection_type: tipo,
         location_id: locacion,
+        inspector_name: inspectorTexto,
         general_notes: notas || null,
         created_by: inspActor()
     };
     if (inspectorId) payload.inspector_id = Number(inspectorId);
-    else if (inspectorTexto) payload.inspector_name = inspectorTexto;
 
     try {
         const url = editandoId
@@ -258,8 +283,10 @@ document.getElementById('inspectionForm')?.addEventListener('submit', async func
             showNotification(data && data.message ? data.message : (t('notify.errorSaveInspection')), 'error');
             return;
         }
-        if (data && data.avisos && data.avisos.includes('inspector_not_in_employees')) {
-            showNotification(t('insp.inspectorNotRegistered'), 'info');
+        // El aviso solo aparece cuando el inspector se ha dado de alta ahora, para
+        // que quede claro que tiene id propio y no es un empleado.
+        if (data && data.inspector_registrado) {
+            showNotification(t('insp.inspectorRegistered', { nombre: inspectorTexto }), 'success');
         } else {
             showNotification(t(editandoId ? 'insp.inspectionUpdated' : 'notify.breakSavedInspection'), 'success');
         }

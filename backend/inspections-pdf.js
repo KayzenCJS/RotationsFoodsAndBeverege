@@ -182,18 +182,14 @@ function generarPDF({ inspecciones, filtros, generadoPor, resumen }) {
         y += 28;
 
         // --- Ficha ------------------------------------------------------------
-        // Inspector: si el id corresponde a un empleado sale su nombre; si no,
-        // se dice con claridad que no se pudo resolver en vez de imprimir un
-        // "null" o dejar un hueco.
-        let textoInspector;
-        if (!insp.inspector_id) {
-            textoInspector = insp.inspector_name ? insp.inspector_name : 'sin inspector registrado';
-        } else {
-            const nombre = insp.inspector_name_resuelta || insp.inspector_name;
-            textoInspector = nombre
-                ? nombre + '  (ID ' + insp.inspector_id + ')'
-                : 'ID ' + insp.inspector_id + ' — no está en la lista de empleados';
-        }
+        // Inspector: los inspectores son una entidad propia, con su propio id, y
+        // no tienen que ver con los empleados. Se imprime el nombre guardado en
+        // la propia inspeccion (la foto del momento en que se hizo) mas su id de
+        // inspector. Cuando no hay nombre, el texto de inspector_display ya
+        // explica el id, asi que no se le añade otra vez.
+        const textoInspector = insp.inspector_name
+            ? insp.inspector_name + '  ·  ID de inspector ' + valor(insp.inspector_id)
+            : valor(insp.inspector_display);
 
         const ficha = [
             ['ID de inspección', valor(insp.inspection_number)],
@@ -204,14 +200,6 @@ function generarPDF({ inspecciones, filtros, generadoPor, resumen }) {
             ['Locación', valor(insp.location_name || insp.location_id)]
         ];
         y = fichaEnDosColumnas(doc, ficha, y);
-
-        // Aviso de inspector que no esta en la base: se dice, no se esconde.
-        if (insp.inspector_id && !insp.inspector_name_resuelta && !insp.inspector_name) {
-            doc.font('Helvetica-Oblique').fontSize(8).fillColor(COLOR.alerta)
-               .text('Nota: el ID ' + insp.inspector_id
-                   + ' no corresponde a ningún empleado registrado. Se conserva tal como estaba guardado.',
-                   MARGEN + 168, y - 12, { width: ANCHO_UTIL_A4 - 168 });
-        }
 
         // --- Notas generales --------------------------------------------------
         y += 4;

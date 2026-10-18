@@ -50,6 +50,10 @@ const H = (t) => (t ? String(t).slice(0, 5) : t);
     for (const t of ['inspections', 'inspection_findings', 'corrections', 'inspection_status_history']) {
         base[t] = (await p.query('SELECT count(*)::int n FROM ' + t)).rows[0].n;
     }
+    // Inspectores que ya habia: se anotan para que la limpieza borre solo los que
+    // cree esta corrida y no toque ninguno real.
+    const inspectoresPreexistentes = (await p.query('SELECT id FROM inspectors')).rows.map(r => r.id);
+    base.inspectors = inspectoresPreexistentes.length;
 
     console.log('estado inicial: ' + JSON.stringify(base));
 
@@ -79,7 +83,7 @@ const H = (t) => (t ? String(t).slice(0, 5) : t);
         body: JSON.stringify({
             inspection_date: FECHAS.inicio,
             inspection_time: '14:30',
-            inspector_id: supervisor.id,
+            inspector_name: 'Inspector De La Prueba',
             inspection_type: 'food_safety',
             location_id: 'pixie-kitchen',
             general_notes: 'Prueba automatica: el aceite no llega a temperatura.'
@@ -91,7 +95,12 @@ const H = (t) => (t ? String(t).slice(0, 5) : t);
     ok(/^INS-/.test(insp.data.inspection_number), 'el ID tiene el formato INS-...');
     ok(insp.data.id > 0, 'tiene id numérico de base de datos');
     eq(insp.data.location_id, 'pixie-kitchen', 'guarda la locación');
-    eq(insp.data.inspector_id, supervisor.id, 'guarda el inspector');
+    // El inspector es una entidad propia: se escribe su nombre y la base le da
+    // un id. No se toma de los empleados.
+    ok(insp.data.inspector_id, 'la base genera un ID de inspector propio: ' + insp.data.inspector_id);
+    ok(insp.data.inspector_id !== supervisor.id,
+       'ese ID no es el de un empleado (empleado ' + supervisor.id + ', inspector ' + insp.data.inspector_id + ')');
+    eq(insp.data.inspector_name, 'Inspector De La Prueba', 'guarda el nombre del inspector');
     eq(H(insp.data.inspection_time), '14:30', 'guarda la hora');
     eq(insp.data.general_notes, 'Prueba automatica: el aceite no llega a temperatura.', 'guarda las notas');
 
@@ -125,7 +134,7 @@ const H = (t) => (t ? String(t).slice(0, 5) : t);
     eq(rLoc.data.error, 'location_not_found', '  con el motivo location_not_found');
     const rFalta = await nodo('/inspections', { method: 'POST', body: JSON.stringify({ inspection_type: 'general', location_id: 'pixie-kitchen' }) });
     eq(rFalta.data.error, 'inspection_date_required', 'sin fecha se rechaza con el motivo');
-    // Inspector externo: se guarda el nombre, no se inventa un empleado.
+    // Inspector que no es empleado: se registra por su cuenta, con id propio.
     const rExt = await nodo('/inspections', {
         method: 'POST',
         body: JSON.stringify({ inspection_date: FECHAS.inicio, inspection_type: 'general',
@@ -133,8 +142,9 @@ const H = (t) => (t ? String(t).slice(0, 5) : t);
     });
     eq(rExt.status, 201, 'se puede inspeccionar con alguien que no es empleado');
     creado.inspecciones.push(rExt.data.id);
-    eq(rExt.data.inspector_id, null, 'sin id de inspector inventado');
-    ok(rExt.data.avisos && rExt.data.avisos.includes('inspector_is_name'), 'avisa de que es un nombre');
+    ok(rExt.data.inspector_id, 'se le asigna un ID de inspector propio: ' + rExt.data.inspector_id);
+    ok(rExt.data.inspector_id !== null && rExt.data.inspector_id !== undefined,
+       'el ID de inspector no queda vacío');
     eq(rExt.data.inspector_name, 'Auditor Externo', 'guarda el nombre tal cual');
 
     console.log('\n=== 5. CREAR HALLAZGO DENTRO DE ESA INSPECCION (3) ===');
@@ -357,10 +367,19 @@ const H = (t) => (t ? String(t).slice(0, 5) : t);
     await p.query('DELETE FROM inspection_status_history WHERE finding_id = ANY($1::int[]) AND finding_id NOT IN (SELECT id FROM inspection_findings)', [creado.hallazgos]);
     await p.query("DELETE FROM finding_categories WHERE lower(btrim(name)) IN ('higiene de manos')");
 
+    // Los inspectores que creo esta corrida. Los que ya habia no se tocan: son
+    // parte del estado real y el test no es dueño de ellos.
+    const inspectoresNuevos = (await p.query(
+        'SELECT id FROM inspectors WHERE NOT (id = ANY($1::int[]))', [inspectoresPreexistentes])).rows.map(r => r.id);
+    if (inspectoresNuevos.length) {
+        await p.query('DELETE FROM inspectors WHERE id = ANY($1::int[])', [inspectoresNuevos]);
+    }
+
     const fin = {};
     for (const t of ['inspections', 'inspection_findings', 'corrections', 'inspection_status_history']) {
         fin[t] = (await p.query('SELECT count(*)::int n FROM ' + t)).rows[0].n;
     }
+    fin.inspectors = (await p.query('SELECT count(*)::int n FROM inspectors')).rows[0].n;
     console.log('estado inicial: ' + JSON.stringify(base));
     console.log('estado final:   ' + JSON.stringify(fin));
     let iguales = 0;

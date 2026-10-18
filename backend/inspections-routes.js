@@ -64,17 +64,109 @@ async function existeEmpleado(pool, id) {
     return (await pool.query('SELECT 1 FROM employees WHERE id = $1', [Number(id)])).rows.length > 0;
 }
 
-// Inspector: puede ser un empleado (se guarda su id) o alguien externo (se
-// guarda solo el nombre). Los ids antiguos que no corresponden a nadie se
-// conservan y se avisan, para no perder el histórico.
-async function validarInspector(pool, valor) {
-    if (textoVacio(valor)) return { valor: null, aviso: null };
-    const n = Number(valor);
-    if (Number.isInteger(n) && String(valor).trim() !== '' && /^\d+$/.test(String(valor).trim())) {
-        if (await existeEmpleado(pool, n)) return { valor: n, aviso: null };
-        return { valor: n, aviso: 'inspector_not_in_employees' };
+// ===========================================================================
+//  COMO SE MUESTRA EL INSPECTOR
+// ===========================================================================
+//  Una sola expresion para el listado, el detalle, el panel de locaciones y el
+//  PDF, para que el inspector se lea igual en todos ellos.
+//
+//  El orden importa:
+//
+//    1. inspections.inspector_name es la FOTO del nombre en el momento de la
+//       inspeccion. Gana siempre que exista: es la garantia de que la
+//       inspeccion sigue mostrando lo que se escribio, aunque el inspector se
+//       renombre o se desactive despues.
+//    2. Si no hay foto (inspecciones antiguas), se usa el nombre que tenga
+//       ahora en el registro de inspectores.
+//    3. Si tampoco, se dice que el id es de una epoca anterior en la que se
+//       guardaba el id de un empleado. Se conserva y se explica; no se borra
+//       ni se reasigna.
+//
+//  Nota: antes este nombre salia de un LEFT JOIN a employees. Eso ademas de
+//  estar equivocado (los inspectores no son empleados) machacaba el snapshot,
+//  porque en una fila con dos columnas del mismo nombre gana la ultima.
+const EXPR_INSPECTOR = `CASE
+        WHEN i.inspector_name IS NOT NULL AND btrim(i.inspector_name) <> ''
+            THEN i.inspector_name
+        WHEN insp.id IS NOT NULL
+            THEN insp.name
+        WHEN i.inspector_id IS NOT NULL
+            THEN 'ID ' || i.inspector_id || ' — registro anterior, sin nombre guardado'
+        ELSE NULL
+    END`;
+
+// El JOIN al registro de inspectores. Se puede usar en cualquier consulta que
+// ya tenga la tabla inspections con alias "i".
+const JOIN_INSPECTOR = 'LEFT JOIN inspectors insp ON insp.id = i.inspector_id';
+
+// ===========================================================================
+//  INSPECTORES
+// ===========================================================================
+//  Los inspectores NO son los empleados del Gestor de Empleados. Se registran
+//  por su cuenta en la tabla `inspectors`, con su propio identificador, y no
+//  se relacionan con `employees` en ningun sentido.
+//
+//  Lo que hace esta funcion, cuando se guarda una inspeccion:
+//
+//    1. Si se eligio un inspector que ya existe (viene su id), se reutiliza.
+//    2. Si se escribio un nombre, se busca ese mismo nombre entre los ya
+//       registrados, ignorando mayusculas y espacios sobrantes. Si esta, se
+//       reutiliza ese: la misma persona no queda registrada dos veces.
+//    3. Si no esta, se da de alta con el id que genera la base de datos.
+//
+//  En los tres casos se devuelve tambien el nombre, que la inspeccion guarda
+//  como foto. Asi el listado, el detalle, el PDF y el historial siguen
+//  mostrando el nombre con el que se hizo la inspeccion, aunque luego se
+//  renombre o se desactive el inspector en el registro.
+//
+//  Nunca se crea un empleado a partir de un inspector, y nunca se exige que el
+//  inspector exista de antemano.
+async function resolverInspector(pool, idCrudo, nombreCrudo) {
+    const nombre = textoVacio(nombreCrudo)
+        ? null
+        : String(nombreCrudo).replace(/\s+/g, ' ').trim().slice(0, 120);
+
+    // 1) Inspector elegido de la lista: se usa ese id.
+    if (!textoVacio(idCrudo)) {
+        const n = Number(idCrudo);
+        if (Number.isInteger(n)) {
+            const x = (await pool.query('SELECT id, name FROM inspectors WHERE id = $1', [n])).rows[0];
+            // El nombre snapshot es el que se escribio; si no se escribio
+            // ninguno, se conserva el que tiene el inspector en el registro.
+            if (x) return { id: x.id, nombre: nombre || x.name, nuevo: false };
+        }
+        // Un id que no existe en el registro no se inventa: se ignora y se
+        // resuelve por nombre, que es lo que sabe el usuario.
     }
-    return { valor: null, nombreExterno: String(valor).trim().slice(0, 120), aviso: 'inspector_is_name' };
+
+    if (!nombre) return { id: null, nombre: null, nuevo: false };
+
+    // 2) Mismo nombre ya registrado (sin distinguir mayusculas ni espacios).
+    //    Se copia el nombre del registro, no el que se acaba de escribir: si
+    //    alguien teclea "ana lopez" y ya esta como "Ana López", la
+    //    inspeccion guardaria la grafia buena y no una tercera variante. Da igual
+    //    que luego se renombre el inspector en el registro: lo que se guarda
+    //    aqui ya queda congelado en esta inspeccion.
+    const existente = (await pool.query(
+        'SELECT id, name FROM inspectors WHERE lower(btrim(name)) = lower(btrim($1)) LIMIT 1',
+        [nombre])).rows[0];
+    if (existente) return { id: existente.id, nombre: existente.name, nuevo: false };
+
+    // 3) Alta nueva. Si la carrera con otra peticion hace que el nombre ya
+    //    exista (indice unico), se recupera el que se creo en el otro intento.
+    try {
+        const r = await pool.query(
+            'INSERT INTO inspectors (name) VALUES ($1) RETURNING id, name', [nombre]);
+        return { id: r.rows[0].id, nombre: r.rows[0].name, nuevo: true };
+    } catch (e) {
+        if (e.code === '23505') {
+            const otra = (await pool.query(
+                'SELECT id, name FROM inspectors WHERE lower(btrim(name)) = lower(btrim($1)) LIMIT 1',
+                [nombre])).rows[0];
+            if (otra) return { id: otra.id, nombre: otra.name, nuevo: false };
+        }
+        throw e;
+    }
 }
 
 // Responsable: id de empleado si existe; si no, el nombre escrito a mano.
@@ -198,6 +290,37 @@ function montarRutasInspecciones(app, getPool) {
     });
 
     // =========================================================================
+    //  INSPECTORES
+    // =========================================================================
+    //  Alimenta el combobox del campo Inspector.
+    //
+    //  Viene de la tabla `inspectors`, NO de `employees`: los inspectores se
+    //  registran por su cuenta y no tienen por qué estar dados de alta como
+    //  empleados. Aqui no se consulta la tabla de empleados en absoluto.
+    //
+    //  El campo del formulario admite escribir un nombre que no esté en esta
+    //  lista; en ese caso el alta la hace el servidor al guardar.
+    app.get('/api/:type/inspectors', async (req, res) => {
+        try {
+            const pool = getPool(req.params.type);
+            const { solo_activos } = req.query;
+            const cond = solo_activos === '1' ? 'WHERE x.is_active' : '';
+            const r = await pool.query(
+                `SELECT x.id, x.name, x.is_active, x.created_at,
+                        (SELECT count(*)::int FROM inspections i
+                          WHERE i.inspector_id = x.id) AS inspecciones,
+                        (SELECT max(i.inspection_date)::text FROM inspections i
+                          WHERE i.inspector_id = x.id) AS ultima_inspeccion
+                   FROM inspectors x
+                   ${cond}
+                  ORDER BY (x.is_active = false), lower(x.name)`);
+            res.json(r.rows);
+        } catch (err) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // =========================================================================
     //  INSPECCIONES
     // =========================================================================
 
@@ -226,7 +349,16 @@ function montarRutasInspecciones(app, getPool) {
             const r = await pool.query(
                 `SELECT i.*,
                         l.name AS location_name,
-                        emp.name AS inspector_name,
+                        ${EXPR_INSPECTOR} AS inspector_display,
+                        (i.inspector_name IS NOT NULL) AS inspector_tiene_foto,
+                        -- Se repiten fecha y hora como texto por una razon concreta:
+                        -- una columna DATE que llega suelta al driver vuelve como
+                        -- fecha-hora en la zona horaria de quien la lee, y se
+                        -- desplazaba un dia al pintarla. Con ::text sale "2026-10-19"
+                        -- y no depende del huso. Se repite despues de i.* porque en
+                        -- una fila con dos columnas del mismo nombre gana la ultima.
+                        i.inspection_date::text AS inspection_date,
+                        i.inspection_time::text AS inspection_time,
                         (SELECT count(*)::int FROM inspection_findings f
                           WHERE f.inspection_id = i.id AND f.deleted_at IS NULL) AS findings_count,
                         (SELECT count(*)::int FROM inspection_findings f
@@ -234,7 +366,7 @@ function montarRutasInspecciones(app, getPool) {
                             AND f.status NOT IN ('closed','audited','corrected')) AS findings_open
                    FROM inspections i
                    LEFT JOIN locations l ON l.id = i.location_id
-                   LEFT JOIN employees emp ON emp.id = i.inspector_id
+                   ${JOIN_INSPECTOR}
                    ${where}
                   ORDER BY i.inspection_date DESC, i.created_at DESC`, params);
             res.json(r.rows);
@@ -252,10 +384,14 @@ function montarRutasInspecciones(app, getPool) {
                 return res.status(404).json({ error: 'inspection_not_found' });
             }
             const insp = (await pool.query(
-                `SELECT i.*, l.name AS location_name, emp.name AS inspector_name
+                `SELECT i.*, l.name AS location_name,
+                        ${EXPR_INSPECTOR} AS inspector_display,
+                        (i.inspector_name IS NOT NULL) AS inspector_tiene_foto,
+                        i.inspection_date::text AS inspection_date,
+                        i.inspection_time::text AS inspection_time
                    FROM inspections i
                    LEFT JOIN locations l ON l.id = i.location_id
-                   LEFT JOIN employees emp ON emp.id = i.inspector_id
+                   ${JOIN_INSPECTOR}
                   WHERE i.id = $1`, [id])).rows[0];
 
             const findings = (await pool.query(
@@ -315,11 +451,14 @@ function montarRutasInspecciones(app, getPool) {
                 return res.status(400).json({ error: 'invalid_status' });
             }
 
-            // El inspector puede venir como id de empleado o como nombre de
-            // alguien que no esta en la tabla. Se prueban los dos: si viene el
-            // id se resuelve ese; si no, se guarda el nombre tal cual.
-            const insp = await validarInspector(
-                pool, !textoVacio(inspector_id) ? inspector_id : inspector_name);
+            // El inspector se escribe en el formulario. No hace falta que este
+            // registrado de antemano, ni que sea empleado, ni que se elija de
+            // una lista: se resuelve aqui y, si es nuevo, la base le da un id.
+            if (textoVacio(inspector_name) && textoVacio(inspector_id)) {
+                return res.status(400).json({ error: 'inspector_name_required',
+                    message: 'Escribe el nombre de quien hizo la inspección.' });
+            }
+            const insp = await resolverInspector(pool, inspector_id, inspector_name);
 
             // El numero se genera en la base con un reintento por si colisiona.
             let row = null;
@@ -332,8 +471,8 @@ function montarRutasInspecciones(app, getPool) {
                          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
                         [nuevoNumeroInspeccion(), inspection_date,
                          textoVacio(inspection_time) ? null : inspection_time,
-                         insp.valor, insp.nombreExterno || null,
-                         String(inspection_type), textoVacio(location_id) ? null : String(location_id),
+                         insp.id, insp.nombre,
+                         String(inspection_type), String(location_id),
                          textoVacio(general_notes) ? null : String(general_notes).slice(0, 5000),
                          status || 'pending', enteroONulo(created_by)])).rows[0];
                 } catch (e) {
@@ -346,7 +485,9 @@ function montarRutasInspecciones(app, getPool) {
                 return res.status(500).json({ error: 'inspection_number_generation_failed' });
             }
 
-            res.status(201).json({ ...row, avisos: insp.aviso ? [insp.aviso] : [] });
+            // Se devuelve tambien si el inspector se dio de alta ahora, para que
+            // la interfaz pueda avisar sin tener que volver a preguntar.
+            res.status(201).json({ ...row, inspector_registrado: !!insp.nuevo });
         } catch (err) {
             res.status(500).json({ error: err.message });
         }
@@ -392,13 +533,16 @@ function montarRutasInspecciones(app, getPool) {
                 if (!INSPECTION_STATUSES.includes(String(b.status))) return res.status(400).json({ error: 'invalid_status' });
                 act.push(['status', String(b.status)]);
             }
-            // Igual que en el alta: se acepta id de empleado o nombre escrito.
-            // Limpiar el inspector (dejarlo vacio) tambien es una peticion
-            // valida, por eso se distingue "no viene" de "viene vacio".
+            // Igual que en el alta: el inspector se escribe, no se busca entre
+            // empleados. Si viene un id, se comprueba que exista en el registro
+            // de inspectores; si no existe, se ignora y manda el nombre.
             if (b.inspector_id !== undefined || b.inspector_name !== undefined) {
-                const enviado = b.inspector_id !== undefined ? b.inspector_id : b.inspector_name;
-                const insp = await validarInspector(pool, enviado);
-                act.push(['inspector_id', insp.valor], ['inspector_name', insp.nombreExterno || null]);
+                if (textoVacio(b.inspector_name) && textoVacio(b.inspector_id)) {
+                    return res.status(400).json({ error: 'inspector_name_required',
+                        message: 'El inspector no puede quedar vacío: escribe su nombre.' });
+                }
+                const insp = await resolverInspector(pool, b.inspector_id, b.inspector_name);
+                act.push(['inspector_id', insp.id], ['inspector_name', insp.nombre]);
             }
 
             if (!act.length) return res.status(400).json({ error: 'no_fields_to_update' });
@@ -927,13 +1071,12 @@ function montarRutasInspecciones(app, getPool) {
             const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
             const inspRows = (await pool.query(
                 `SELECT i.*, l.name AS location_name,
-                        CASE WHEN emp.name IS NOT NULL THEN emp.name
-                                     WHEN i.inspector_name IS NOT NULL THEN i.inspector_name
-                                     ELSE NULL END AS inspector_name_resuelta,
-                        (emp.id IS NOT NULL) AS inspector_existe
+                        ${EXPR_INSPECTOR} AS inspector_display,
+                        (i.inspector_name IS NOT NULL) AS inspector_tiene_foto,
+                        (insp.id IS NOT NULL) AS inspector_registrado
                    FROM inspections i
                    LEFT JOIN locations l ON l.id = i.location_id
-                   LEFT JOIN employees emp ON emp.id = i.inspector_id
+                   ${JOIN_INSPECTOR}
                    ${where}
                   ORDER BY i.inspection_date DESC, i.created_at DESC`, params)).rows;
 
@@ -1031,9 +1174,15 @@ function montarRutasInspecciones(app, getPool) {
                         i.inspection_time::text AS inspection_time,
                         i.inspection_type, i.status,
                         i.inspector_id, i.inspector_name,
-                        CASE WHEN emp.name IS NOT NULL THEN emp.name
-                                     WHEN i.inspector_name IS NOT NULL THEN i.inspector_name
-                                     ELSE NULL END AS inspector_display,
+                        CASE
+                            WHEN i.inspector_name IS NOT NULL AND btrim(i.inspector_name) <> ''
+                                THEN i.inspector_name
+                            WHEN insp.id IS NOT NULL
+                                THEN insp.name
+                            WHEN i.inspector_id IS NOT NULL
+                                THEN 'ID ' || i.inspector_id || ' — registro anterior, sin nombre guardado'
+                            ELSE NULL
+                        END AS inspector_display,
                         (SELECT count(*)::int FROM inspections x WHERE x.location_id = l.id) AS inspecciones_total,
                         (SELECT count(*)::int FROM inspection_findings f
                           WHERE f.location_id = l.id AND f.deleted_at IS NULL) AS hallazgos_total,
@@ -1046,7 +1195,7 @@ function montarRutasInspecciones(app, getPool) {
                          WHERE x.location_id = l.id
                          ORDER BY x.inspection_date DESC, x.created_at DESC
                          LIMIT 1) i ON true
-                   LEFT JOIN employees emp ON emp.id = i.inspector_id
+                   LEFT JOIN inspectors insp ON insp.id = i.inspector_id
                   ORDER BY l.name`);
             res.json(r.rows);
         } catch (err) {
