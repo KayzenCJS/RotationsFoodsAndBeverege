@@ -20,7 +20,7 @@ const toRows = (n) => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: f
 console.log('\n=== A. Deteccion de formato por CONTENIDO (no por nombre) ===');
 const isQ = ExcelImport.isQuinyxSchedule(toRows('Schedule'));
 eq(isQ, true, 'la hoja Schedule se reconoce como formato de horario real');
-ok(!ExcelImport.isQuinyxSchedule([['Employee', 'Location', 'Date', 'Start'], ['Anna', 'Food Fair', '2026-10-07', '09:00']]),
+ok(!ExcelImport.isQuinyxSchedule([['Employee', 'Location', 'Date', 'Start'], ['Bea', 'Food Fair', '2026-10-07', '09:00']]),
    'una tabla plana NO se confunde con el formato de horario');
 
 console.log('=== B. Conversion al contrato de filas comun ===');
@@ -36,14 +36,14 @@ eq(rows.every((r) => r.work_date === null), true, 'todas las filas sin fecha (la
 eq(rows.every((r) => r.kind === 'schedule'), true, 'kind = schedule');
 
 console.log('  ... §21 el ejemplo literal del usuario');
-const anna = rows.find((r) => r.name === 'Anna Dragan' && r.location_name === 'Pixie/DD Kitchen');
-eq([anna.start_time, anna.end_time, anna.role], ['09:00', '17:00', 'Sales 1'], 'Anna Dragan 09:00-17:00 Sales 1');
-eq(anna.shift_label, 'Day', 'shiftLabel Day');
-const ral = rows.find((r) => r.name === 'Raluca' && r.location_name === 'Pixie/DD Kitchen');
-eq([ral.start_time, ral.end_time], ['17:00', '22:00'], 'Raluca 17:00-22:00');
+const turno = rows.find((r) => r.name === 'Nadia Castro' && r.location_name === 'Pixie/DD Kitchen');
+eq([turno.start_time, turno.end_time, turno.role], ['09:00', '17:00', 'Sales 1'], 'Nadia Castro 09:00-17:00 Sales 1');
+eq(turno.shift_label, 'Day', 'shiftLabel Day');
+const ral = rows.find((r) => r.name === 'Rocio' && r.location_name === 'Pixie/DD Kitchen');
+eq([ral.start_time, ral.end_time], ['17:00', '22:00'], 'Rocio 17:00-22:00');
 eq(ral.shift_label, 'Night', 'shiftLabel Night');
-const alexa = rows.find((r) => r.name === 'Alexa' && r.location_name === 'Pixie/DD Kitchen');
-eq([alexa.start_time, alexa.end_time, alexa.role], ['08:00', '22:00', 'Server'], 'Alexa 08:00-22:00 Server');
+const nadia = rows.find((r) => r.name === 'Nadia' && r.location_name === 'Pixie/DD Kitchen');
+eq([nadia.start_time, nadia.end_time, nadia.role], ['08:00', '22:00', 'Server'], 'Nadia 08:00-22:00 Server');
 
 console.log('  ... §4/§12 "(Day)"/"(Night)" nunca en el nombre');
 eq(rows.some((r) => /\((Day|Night)\)/.test(r.name)), false, 'ningun nombre conserva (Day)/(Night)');
@@ -62,7 +62,7 @@ ok(!rows.some((r) => r.name === 'N' || r.name === 'A'), '"N/A" no produce emplea
 console.log('=== C. Hoja de empleados (solo matching) ===');
 const empRef = ExcelImport.buildEmployeesReference(toRows('Empleados'), 'Empleados');
 ok(empRef.length > 0, 'se leen ' + empRef.length + ' empleados del export de Quinyx');
-ok(empRef.some((e) => e.name === 'Anna Dragan'), 'incluye Anna Dragan');
+ok(empRef.some((e) => e.name === 'Nadia Castro'), 'incluye Nadia Castro');
 ok(!empRef.some((e) => /^n\/?a$/i.test(e.name)), 'excluye N/A');
 ok(empRef.every((e) => e.name), 'todos con nombre');
 
@@ -80,9 +80,9 @@ const LOCATIONS = [
   { id: 'world-pavilion', name: 'World Pavilion' }
 ];
 const EMPLOYEES = [
-  { id: 1, name: 'Anna Dragan' }, { id: 2, name: 'Raluca' }, { id: 3, name: 'Alexa' },
-  { id: 4, name: 'Jose' }, { id: 5, name: 'Jose ' }, { id: 6, name: 'Cosmin' },
-  { id: 7, name: 'Anna' }, { id: 8, name: 'Anna Dragana' }
+  { id: 1, name: 'Nadia Castro' }, { id: 2, name: 'Rocio' }, { id: 3, name: 'Nadia' },
+  { id: 4, name: 'Joaquin' }, { id: 5, name: 'Joaquin ' }, { id: 6, name: 'Cesar' },
+  { id: 7, name: 'Bea' }, { id: 8, name: 'Nadia Castroa' }
 ];
 
 console.log('  ... §15 locations del archivo -> locations de la BD');
@@ -103,32 +103,32 @@ console.log('  ... locations que NO existen se marcan, no se crean');
   });
 
 console.log('  ... §11 matching de empleados');
-const m1 = ExcelImport.matchEmployee({ name: 'Anna Dragan' }, [{ id: 1, name: 'Anna Dragan' }]);
-eq(m1.employee && m1.employee.name, 'Anna Dragan', 'Anna Dragan hace match exacto');
+const m1 = ExcelImport.matchEmployee({ name: 'Nadia Castro' }, [{ id: 1, name: 'Nadia Castro' }]);
+eq(m1.employee && m1.employee.name, 'Nadia Castro', 'Nadia Castro hace match exacto');
 ok(m1.confident, 'match exacto y sin gemelos = confiante');
-const m2 = ExcelImport.matchEmployee({ name: 'Alexa' }, EMPLOYEES);
-eq(m2.employee && m2.employee.id, 3, 'Alexa hace match');
-const m3 = ExcelImport.matchEmployee({ name: 'Deniz' }, EMPLOYEES);
-eq(m3.employee, null, 'Deniz NO existe -> null, no se crea');
-// §11: el horario dice "Anna Dragan" y la BD tiene "Anna Dragan" Y
-// "Anna Dragana" -> 2 coincidencias exactas, debe pedir que elija.
+const m2 = ExcelImport.matchEmployee({ name: 'Nadia' }, EMPLOYEES);
+eq(m2.employee && m2.employee.id, 3, 'Nadia hace match');
+const m3 = ExcelImport.matchEmployee({ name: 'Ferdi' }, EMPLOYEES);
+eq(m3.employee, null, 'Ferdi NO existe -> null, no se crea');
+// §11: el horario dice "Nadia Castro" y la BD tiene "Nadia Castro" Y
+// "Nadia Castroa" -> 2 coincidencias exactas, debe pedir que elija.
 const AMBIGUOS = [
-  { id: 1, name: 'Anna Dragan' }, { id: 2, name: 'Anna Dragana' }
+  { id: 1, name: 'Nadia Castro' }, { id: 2, name: 'Nadia Castroa' }
 ];
-const mAmb = ExcelImport.matchEmployee({ name: 'Anna Dragan' }, AMBIGUOS);
+const mAmb = ExcelImport.matchEmployee({ name: 'Nadia Castro' }, AMBIGUOS);
 eq(mAmb.employee, null, '2 coincidencias: no decide solo');
 ok(mAmb.ambiguous && mAmb.ambiguous.length === 2, 'ofrece los 2 candidatos');
 eq(mAmb.method, 'name_exact_ambiguous', 'metodo name_exact_ambiguous');
 
 // Un nombre exacto que SI existe se resuelve solo, sin preguntar.
-const mExact = ExcelImport.matchEmployee({ name: 'Anna' }, EMPLOYEES);
-eq(mExact.employee && mExact.employee.id, 7, '"Anna" existe exactamente -> match directo');
+const mExact = ExcelImport.matchEmployee({ name: 'Bea' }, EMPLOYEES);
+eq(mExact.employee && mExact.employee.id, 7, '"Bea" existe exactamente -> match directo');
 
-console.log('  ... "Jose" duplicado en la BD (ambiguo por diseño)');
-const mj = ExcelImport.matchEmployee({ name: 'Jose' }, EMPLOYEES);
-ok(mj.employee === null || mj.employee, 'Jose devuelve resultado definido');
-const mJose = ExcelImport.matchEmployee({ name: 'Jose' }, [{ id: 4, name: 'Jose' }, { id: 5, name: 'Jose ' }]);
-ok(mJose.ambiguous || mJose.candidates, '"Jose" vs "Jose " -> pide confirmacion');
+console.log('  ... "Joaquin" duplicado en la BD (ambiguo por diseño)');
+const mj = ExcelImport.matchEmployee({ name: 'Joaquin' }, EMPLOYEES);
+ok(mj.employee === null || mj.employee, 'Joaquin devuelve resultado definido');
+const mJose = ExcelImport.matchEmployee({ name: 'Joaquin' }, [{ id: 4, name: 'Joaquin' }, { id: 5, name: 'Joaquin ' }]);
+ok(mJose.ambiguous || mJose.candidates, '"Joaquin" vs "Joaquin " -> pide confirmacion');
 
 console.log('=== E. Toda fila del archivo acaba con empleado + location + horario ===');
 const usable = rows.filter((r) => !r.needs_review);

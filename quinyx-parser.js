@@ -11,11 +11,11 @@
 //  Caracteristicas que maneja:
 //    - La LOCATION se hereda hacia abajo hasta que aparece otra.
 //    - La misma celda puede traer location + horario ("Slush Factory 10-9:30").
-//    - Varios empleados separados por "/"  -> "Anna Dragan (Day) / Raluca (Night)"
+//    - Varios empleados separados por "/"  -> "Nadia Castro (Day) / Rocio (Night)"
 //    - Varios rangos separados por "/"    -> "9-5pm / 5pm-10pm"
 //    - Se emparejan por POSICION (§5).
 //    - Sufijos (Day)/(Night) -> metadato shiftLabel, nunca parte del nombre.
-//    - "Coord - Edward" -> rol Coord + nombre Edward.
+//    - "Coord - Eduardo" -> rol Coord + nombre Eduardo.
 //    - "until 10pm" -> hereda el fin del turno anterior.
 // ============================================================================
 
@@ -202,8 +202,8 @@ const QuinyxParser = (() => {
 
   // -------------------------------------------------------------------------
   //  NOMBRES DE EMPLEADO (§4, §12, §13)
-  //  "Anna Dragan (Day)"  -> { name: "Anna Dragan", shiftLabel: "Day" }
-  //  "Coord - Edward"     -> { name: "Edward", roleHint: "Coord" }
+  //  "Nadia Castro (Day)"  -> { name: "Nadia Castro", shiftLabel: "Day" }
+  //  "Coord - Eduardo"     -> { name: "Eduardo", roleHint: "Coord" }
   // -------------------------------------------------------------------------
   const ROLE_PREFIX_RE = /^(.+?)\s*[-–—]\s*(.+)$/;
 
@@ -234,7 +234,7 @@ const QuinyxParser = (() => {
         else shiftLabel = inner || null;
       }
 
-      // prefijo de rol "Coord - Edward"
+      // prefijo de rol "Coord - Eduardo"
       const r = ROLE_PREFIX_RE.exec(name);
       if (r) {
         const left = r[1].trim();
@@ -392,20 +392,20 @@ const QuinyxParser = (() => {
 
         if (people.length === ranges.length) {
           // Caso normal: N empleados / N rangos -> emparejamiento por posicion.
-          //   "9-5pm / 5pm-10pm" + "Anna / Raluca"
-          //     Anna -> 09:00-17:00 ; Raluca -> 17:00-22:00
+          //   "9-5pm / 5pm-10pm" + "Bea / Rocio"
+          //     Bea -> 09:00-17:00 ; Rocio -> 17:00-22:00
           r = ranges[idx];
         } else if (people.length === 1 && ranges.length > 1) {
           // 1 persona y varios rangos: se toma del inicio del primero al fin
           // del ultimo, pero se marca para revision porque casi siempre
           // falta el nombre de la segunda persona.
-          //   "8-5pm / 4pm-10pm" + "Ploi" -> 08:00-22:00 (revisar)
+          //   "8-5pm / 4pm-10pm" + "Priscilla" -> 08:00-22:00 (revisar)
           r = { start: ranges[0].start, end: ranges[ranges.length - 1].end, raw: ranges.map((x) => x.raw).join(' / ') };
           review = 'multiple_ranges_single_employee';
         } else if (people.length > ranges.length) {
           // Mas personas que rangos: el ultimo rango se reparte entre los que
           // sobran. Si solo hay UN rango no hay nada raro (varias personas
-          // cubriendo el mismo turno, p.ej. "Jay / Jacob / Fabian").
+          // cubriendo el mismo turno, p.ej. "Jay / Jacobo / Fabio").
           r = ranges[Math.min(idx, ranges.length - 1)];
           if (ranges.length > 1) review = 'more_employees_than_ranges';
         } else {

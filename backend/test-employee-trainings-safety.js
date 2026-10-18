@@ -10,10 +10,10 @@ const get = async (id) => {
   let pass = 0, fail = 0;
   const ok = (v, m) => { if (v) { pass++; console.log('  OK   ' + m); } else { fail++; console.log('  FAIL ' + m); } };
 
-  // Se usa un empleado con muitas capacitaciones: Claudeen Jimenez (id 21, 82).
+  // Se usa un empleado con muitas capacitaciones: Oriana Mendoza (id 21, 82).
   const antes = await get(21);
   const nAntes = (antes.trainings || []).length;
-  console.log('  Claudeen Jimenez tiene ' + nAntes + ' capacitaciones\n');
+  console.log('  Oriana Mendoza tiene ' + nAntes + ' capacitaciones\n');
 
   const base = {
     name: antes.name, nationality: antes.nationality, age: antes.age,

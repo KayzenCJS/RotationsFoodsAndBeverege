@@ -260,7 +260,7 @@ const ExcelImport = (() => {
   }
 
   // Similitud por caracteres (Levenshtein). La de tokens no sirve para
-  // distinguir "Anna Dragan" de "Anna Dragana" (0.5 en ambos casos), pero
+  // distinguir "Nadia Castro" de "Nadia Castroa" (0.5 en ambos casos), pero
   // §11 exige avisar cuando la BD tiene dos nombres casi iguales.
   function editSimilarity(a, b) {
     const x = squish(a), y = squish(b);
@@ -314,8 +314,8 @@ const ExcelImport = (() => {
     if (!name) return { employee: null, method: null };
     const exact = employees.filter((e) => squish(e.name) === name);
     if (exact.length === 1) {
-      // §11: si además existen nombres casi idénticos ("Anna Dragan" y
-      // "Anna Dragana"), no decide solo: avisa y deja elegir.
+      // §11: si además existen nombres casi idénticos ("Nadia Castro" y
+      // "Nadia Castroa"), no decide solo: avisa y deja elegir.
       const twins = nearDuplicates(row.name, employees, exact[0]);
       if (twins.length) {
         return {

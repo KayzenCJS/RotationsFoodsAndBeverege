@@ -240,19 +240,19 @@ const snapshot = async () => {
   eq(c4.ok, true, 'Front OPS 09-17 + Pixie Support 19-21 -> VÁLIDO');
 
   console.log('\n=== 7. Notas del día (§14) ===');
-  const n1 = await api('POST', '/schedule-notes', { work_date: TEST_DATE, note: 'Cosmin no puede trabajar después de las 10 PM.', created_by: 'test' });
+  const n1 = await api('POST', '/schedule-notes', { work_date: TEST_DATE, note: 'Cesar no puede trabajar después de las 10 PM.', created_by: 'test' });
   eq(n1.ok, true, 'nota creada');
   const n2 = await api('POST', '/schedule-notes', { work_date: TEST_DATE, note: 'Student Dining needs additional support.' });
   await api('POST', '/schedule-notes', { work_date: '2099-11-12', note: 'Nota del dia siguiente' });
   const notes = (await api('GET', '/schedule-notes?date=' + TEST_DATE)).data;
   eq(notes.length, 2, '2 notas en ' + TEST_DATE);
-  eq(notes.map(n => n.note).sort(), ['Cosmin no puede trabajar después de las 10 PM.', 'Student Dining needs additional support.'].sort(), 'contenido correcto');
+  eq(notes.map(n => n.note).sort(), ['Cesar no puede trabajar después de las 10 PM.', 'Student Dining needs additional support.'].sort(), 'contenido correcto');
   const notesNext = (await api('GET', '/schedule-notes?date=2099-11-12')).data;
   eq(notesNext.length, 1, 'la nota del día siguiente está separada (§18)');
-  const ed = await api('PUT', '/schedule-notes/' + n1.data.id, { note: 'Cosmin no shift after 10pm.' });
+  const ed = await api('PUT', '/schedule-notes/' + n1.data.id, { note: 'Cesar no shift after 10pm.' });
   eq(ed.ok, true, 'nota editada');
   eq((await api('GET', '/schedule-notes?date=' + TEST_DATE)).data.find(n => n.id === n1.data.id).note,
-     'Cosmin no shift after 10pm.', 'texto actualizado');
+     'Cesar no shift after 10pm.', 'texto actualizado');
   await api('DELETE', '/schedule-notes/' + n2.data.id);
   eq((await api('GET', '/schedule-notes?date=' + TEST_DATE)).data.length, 1, 'nota eliminada');
   eq((await api('GET', '/schedule-notes?date=2099-11-12')).data.length, 1, 'borrar una nota no toca la del otro día');

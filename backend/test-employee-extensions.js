@@ -90,7 +90,7 @@ const RETIRADAS = ['sundae-training', 'prep-tater-kegs', 'prep-toppings',
   console.log('\n=== 1b. UNA LETRA DE GRUPO NUNCA ES UNA CAPACITACION ===');
   // El formulario de empleado tiene casillas que NO son capacitaciones: las de
   // "Grupos adicionales", con los valores A, B, C y D. Un selector generico las
-  // guardaba como certificaciones y Edward se quedo con 4 filas basura. Se
+  // guardaba como certificaciones y Eduardo se quedo con 4 filas basura. Se
   // comprueba que el servidor las rechaza aunque el cliente las mande.
   const baseEmp = {
     name: emp.name, nationality: emp.nationality, age: emp.age, role: emp.role,

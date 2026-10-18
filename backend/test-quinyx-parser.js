@@ -77,20 +77,20 @@ eq(Q.parseTimeCell('until 10pm').end,    1320,      '"until 10pm" -> 22:00');
 // ---------------------------------------------------------------------------
 console.log('--- 2. NOMBRES (§4, §12, §13) ---');
 const names = (c) => Q.parseEmployeeCell(c).map((p) => p.name + (p.shiftLabel ? '[' + p.shiftLabel + ']' : '')).join(', ');
-eq(names('Anna Dragan (Day) / Raluca (Night)'), 'Anna Dragan[Day], Raluca[Night]', 'dos personas con turno');
-eq(names('Anna Dragan (Day)'),   'Anna Dragan[Day]',  '(Day) -> shiftLabel, no parte del nombre');
-eq(names('Raluca (Night)'),      'Raluca[Night]',     '(Night) -> shiftLabel');
+eq(names('Nadia Castro (Day) / Rocio (Night)'), 'Nadia Castro[Day], Rocio[Night]', 'dos personas con turno');
+eq(names('Nadia Castro (Day)'),   'Nadia Castro[Day]',  '(Day) -> shiftLabel, no parte del nombre');
+eq(names('Rocio (Night)'),      'Rocio[Night]',     '(Night) -> shiftLabel');
 eq(names('Andrew (Day) / Nisa (Night)'), 'Andrew[Day], Nisa[Night]', 'Andrew/Nisa');
-eq(names('Cosmin / Ploi'),       'Cosmin, Ploi', 'dos personas simples');
-eq(names('Juan Pablo / Raluca'), 'Juan Pablo, Raluca', 'nombre con espacio');
-eq(names('Coord - Edward'),      'Edward', '"Coord - Edward" -> solo el nombre');
-eq(Q.parseEmployeeCell('Coord - Edward')[0].roleHint, 'Coord', '"Coord - Edward" guarda el rol aparte');
-eq(Q.parseEmployeeCell('Front Coord - Edward')[0].name, 'Edward', '"Front Coord - Edward"');
-eq(Q.parseEmployeeCell('Front Coord - Edward')[0].roleHint, 'Front Coord', 'rol con dos palabras');
+eq(names('Cesar / Priscilla'),       'Cesar, Priscilla', 'dos personas simples');
+eq(names('Julian Reyes / Rocio'), 'Julian Reyes, Rocio', 'nombre con espacio');
+eq(names('Coord - Eduardo'),      'Eduardo', '"Coord - Eduardo" -> solo el nombre');
+eq(Q.parseEmployeeCell('Coord - Eduardo')[0].roleHint, 'Coord', '"Coord - Eduardo" guarda el rol aparte');
+eq(Q.parseEmployeeCell('Front Coord - Eduardo')[0].name, 'Eduardo', '"Front Coord - Eduardo"');
+eq(Q.parseEmployeeCell('Front Coord - Eduardo')[0].roleHint, 'Front Coord', 'rol con dos palabras');
 eq(Q.parseEmployeeCell('N/A').length,     0, '"N/A" no genera empleados (ni "N" ni "A")');
 eq(Q.parseEmployeeCell('NO FOOD').length, 0, '"NO FOOD" no es una persona');
 eq(Q.parseEmployeeCell('').length,        0, 'celda vacia');
-eq(Q.parseEmployeeCell('Cosmin')[0].name, 'Cosmin', 'nombre normal intacto');
+eq(Q.parseEmployeeCell('Cesar')[0].name, 'Cesar', 'nombre normal intacto');
 
 // ---------------------------------------------------------------------------
 console.log('--- 3. HOJA SCHEDULE COMPLETA ---');
@@ -99,19 +99,19 @@ const sched = [
   ['Last Call On Alcohol All Locations 9:30pm!!'],
   ['Front Ops', 'Time', 'Name', '', 'Oasis / Dutch OPS', 'Time', 'Name'],
   ['Pixie/DD Kitchen', '', '', '', 'Oasis', '', ''],
-  ['', '9:30', 'Front Coord - Edward', '', '', '9pm Kitchen', 'Coord - Hayleigh'],
-  ['Sales 1', '9-5pm / 5pm-10pm', 'Anna Dragan (Day) / Raluca (Night)', '', '', '9:30pm Alcohol', 'Sharon'],
-  ['Sales 2', '8-6pm', 'Danna', '', 'Sales', '9:45-5 / 5-10', ''],
-  ['Server', '8-10pm', 'Alexa', '', 'Server', '10-10', 'Silviu'],
-  ['Server', '9-5pm / 5pm-10pm', 'Claire', '', 'Server', '10-10', 'Markos'],
-  ['Cook', '8-10pm', 'Cosmin', '', 'Server/Cook', '10:15-10', 'Deniz (Day) / Yagiz (Night)'],
-  ['Cook', '8-5pm / 4pm-10pm', 'Ploi', '', 'Cook', '9-10', 'Ahmet'],
-  ['Guard House Snacks', '', '', '', 'Cook', '9:30-10', 'Jose (Day) / Cosmin (Night)'],
-  ['Sales', '9-9:30', 'Boonng', '', 'Dutch Village', '', ''],
-  ['Sales', '9-9:30pm', 'Jolin', '', '', 'until 10pm', ''],
-  ['Sales', '9-9:30pm', 'Tyler', '', 'Cash', '10-5:15pm / 5:15-10pm', 'Anna (Day)'],
-  ['Tea', '', '', '', 'Server', '10-10pm', 'Claire'],
-  ['Server', '5-10pm', 'Madison', '', '', '', '']
+  ['', '9:30', 'Front Coord - Eduardo', '', '', '9pm Kitchen', 'Coord - Helena'],
+  ['Sales 1', '9-5pm / 5pm-10pm', 'Nadia Castro (Day) / Rocio (Night)', '', '', '9:30pm Alcohol', 'Sara'],
+  ['Sales 2', '8-6pm', 'Dora', '', 'Sales', '9:45-5 / 5-10', ''],
+  ['Server', '8-10pm', 'Nadia', '', 'Server', '10-10', 'Sorin'],
+  ['Server', '9-5pm / 5pm-10pm', 'Gemma', '', 'Server', '10-10', 'Nestor'],
+  ['Cook', '8-10pm', 'Cesar', '', 'Server/Cook', '10:15-10', 'Ferdi (Day) / Yigit (Night)'],
+  ['Cook', '8-5pm / 4pm-10pm', 'Priscilla', '', 'Cook', '9-10', 'Cem'],
+  ['Guard House Snacks', '', '', '', 'Cook', '9:30-10', 'Joaquin (Day) / Cesar (Night)'],
+  ['Sales', '9-9:30', 'Dario', '', 'Dutch Village', '', ''],
+  ['Sales', '9-9:30pm', 'Jolanda', '', '', 'until 10pm', ''],
+  ['Sales', '9-9:30pm', 'Tobias', '', 'Cash', '10-5:15pm / 5:15-10pm', 'Bea (Day)'],
+  ['Tea', '', '', '', 'Server', '10-10pm', 'Gemma'],
+  ['Server', '5-10pm', 'Marisol', '', '', '', '']
 ];
 const r = Q.parseScheduleSheet(sched, 'Schedule');
 const find = (n, loc) => r.records.find((x) => x.employee_name === n && (loc ? x.location_name === loc : true));
@@ -121,41 +121,41 @@ eq(r.format, 'quinyx_schedule', 'formato detectado');
 eq(r.blocks, 2, 'dos bloques (izquierda y derecha)');
 
 console.log('  ... §5 emparejamiento por posicion');
-eq(find('Anna Dragan').start_time, '09:00', 'Anna Dragan -> 09:00');
-eq(find('Anna Dragan').end_time,   '17:00', 'Anna Dragan -> 17:00');
-eq(find('Raluca').start_time,      '17:00', 'Raluca -> 17:00');
-eq(find('Raluca').end_time,        '22:00', 'Raluca -> 22:00');
-eq(find('Anna Dragan').shift_label,'Day',   'shiftLabel Day');
-eq(find('Raluca').shift_label,     'Night','shiftLabel Night');
+eq(find('Nadia Castro').start_time, '09:00', 'Nadia Castro -> 09:00');
+eq(find('Nadia Castro').end_time,   '17:00', 'Nadia Castro -> 17:00');
+eq(find('Rocio').start_time,      '17:00', 'Rocio -> 17:00');
+eq(find('Rocio').end_time,        '22:00', 'Rocio -> 22:00');
+eq(find('Nadia Castro').shift_label,'Day',   'shiftLabel Day');
+eq(find('Rocio').shift_label,     'Night','shiftLabel Night');
 
 console.log('  ... §6 location heredada de la seccion');
-eq(find('Alexa').location_name, 'Pixie/DD Kitchen', 'Alexa hereda Pixie/DD Kitchen');
-eq(find('Danna').location_name, 'Pixie/DD Kitchen', 'Danna hereda Pixie/DD Kitchen');
-eq(find('Silviu').location_name, 'Oasis', 'Silviu hereda Oasis (bloque derecho)');
-eq(find('Boonng').location_name, 'Guard House Snacks', 'Boonng hereda Guard House Snacks');
-eq(find('Anna').location_name, 'Dutch Village', 'Anna hereda Dutch Village (sin repetir location)');
+eq(find('Nadia').location_name, 'Pixie/DD Kitchen', 'Nadia hereda Pixie/DD Kitchen');
+eq(find('Dora').location_name, 'Pixie/DD Kitchen', 'Dora hereda Pixie/DD Kitchen');
+eq(find('Sorin').location_name, 'Oasis', 'Sorin hereda Oasis (bloque derecho)');
+eq(find('Dario').location_name, 'Guard House Snacks', 'Dario hereda Guard House Snacks');
+eq(find('Bea').location_name, 'Dutch Village', 'Bea hereda Dutch Village (sin repetir location)');
 
 console.log('  ... §14 roles');
-eq(find('Anna Dragan').role, 'Sales 1', 'role "Sales 1"');
-eq(find('Danna').role,       'Sales 2', 'role "Sales 2"');
-eq(find('Alexa').role,      'Server',  'role "Server"');
-eq(find('Deniz').role,       'Server/Cook', 'role compuesto "Server/Cook"');
+eq(find('Nadia Castro').role, 'Sales 1', 'role "Sales 1"');
+eq(find('Dora').role,       'Sales 2', 'role "Sales 2"');
+eq(find('Nadia').role,      'Server',  'role "Server"');
+eq(find('Ferdi').role,       'Server/Cook', 'role compuesto "Server/Cook"');
 
 console.log('  ... §7 dos bloques en paralelo');
-eq(find('Silviu').start_time, '10:00', 'Silviu bloque derecho 10:00');
-eq(find('Markos').start_time, '10:00', 'Markos bloque derecho 10:00');
-eq(find('Deniz').start_time,  '10:15', 'Deniz 10:15');
-eq(find('Yagiz').end_time,    '22:00', 'Yagiz 22:00');
+eq(find('Sorin').start_time, '10:00', 'Sorin bloque derecho 10:00');
+eq(find('Nestor').start_time, '10:00', 'Nestor bloque derecho 10:00');
+eq(find('Ferdi').start_time,  '10:15', 'Ferdi 10:15');
+eq(find('Yigit').end_time,    '22:00', 'Yigit 22:00');
 
 console.log('  ... casos que necesitan revision');
-eq(find('Edward').needs_review, 'no_separator', 'fila 4: "9:30" sin fin');
-eq(find('Hayleigh').needs_review, 'no_separator', '"9pm Kitchen" no es un horario');
-eq(find('Sharon', 'Oasis').needs_review, 'no_separator', '"9:30pm Alcohol" no es un horario');
-eq(find('Ploi').needs_review, 'multiple_ranges_single_employee', 'Ploi con 2 rangos y 1 nombre');
-ok(find('Cosmin', 'Oasis'), 'Cosmin aparece en ambos bloques (Pixie y Oasis)');
+eq(find('Eduardo').needs_review, 'no_separator', 'fila 4: "9:30" sin fin');
+eq(find('Helena').needs_review, 'no_separator', '"9pm Kitchen" no es un horario');
+eq(find('Sara', 'Oasis').needs_review, 'no_separator', '"9:30pm Alcohol" no es un horario');
+eq(find('Priscilla').needs_review, 'multiple_ranges_single_employee', 'Priscilla con 2 rangos y 1 nombre');
+ok(find('Cesar', 'Oasis'), 'Cesar aparece en ambos bloques (Pixie y Oasis)');
 
 console.log('  ... "Tea" no es una location');
-eq(find('Madison').location_name, 'Guard House Snacks', 'fila tras "Tea" conserva Guard House Snacks');
+eq(find('Marisol').location_name, 'Guard House Snacks', 'fila tras "Tea" conserva Guard House Snacks');
 ok(!r.sections.some((s) => /tea/i.test(s)), '"Tea" no se registra como location');
 ok(!r.records.some((x) => x.location_name === 'Tea'), 'ningun registro queda en location "Tea"');
 
@@ -167,18 +167,18 @@ console.log('  ... deteccion de formato');
 eq(Q.looksLikeQuinyxSchedule(sched), true, 'layout visual -> schedule real');
 eq(Q.looksLikeQuinyxSchedule([
   ['Employee', 'Location', 'Date', 'Start', 'End'],
-  ['Anna', 'Food Fair', '2026-10-07', '09:00', '17:00']
+  ['Bea', 'Food Fair', '2026-10-07', '09:00', '17:00']
 ]), false, 'tabla plana -> NO es el formato de horario');
 
 console.log('--- 4. HOJA EMPLEADOS (export Quinyx) ---');
 const emp = Q.parseEmployeesSheet([
   ['Nombre', 'Nacionalidad', 'Edad', 'Rol', 'Grupo', 'Estado'],
-  ['Anna Dragan', 'Romania', 24, 'Sales', 'Front Ops', 'Activo'],
-  ['Raluca', 'Romania', 31, 'Sales', 'Front Ops', 'Activo'],
+  ['Nadia Castro', 'Romania', 24, 'Sales', 'Front Ops', 'Activo'],
+  ['Rocio', 'Romania', 31, 'Sales', 'Front Ops', 'Activo'],
   ['N/A', '', '', '', '', '']
 ], 'Empleados');
 eq(emp.employees.length, 2, '2 empleados (N/A excluido)');
-eq(emp.employees[0].name, 'Anna Dragan', 'nombre');
+eq(emp.employees[0].name, 'Nadia Castro', 'nombre');
 eq(emp.employees[0].nationality, 'Romania', 'nacionalidad');
 eq(emp.employees[0].age, 24, 'edad');
 eq(emp.employees[0].role, 'Sales', 'rol');
@@ -189,14 +189,14 @@ console.log('--- 5. LOCATION CON HORARIO EN LA MISMA CELDA ---');
 const r2 = Q.parseScheduleSheet([
   ['Front Ops', 'Time', 'Name'],
   ['Slush Factory 10-9:30'],
-  ['Sales', '10:30-5:30', 'Danna (Day)'],
-  ['Sales', '5:30-10', 'Coral (Night)']
+  ['Sales', '10:30-5:30', 'Dora (Day)'],
+  ['Sales', '5:30-10', 'Elsa (Night)']
 ], 'Schedule');
 eq(r2.records.length, 2, '2 registros');
 eq(r2.records[0].location_name, 'Slush Factory', '"Slush Factory 10-9:30" -> location + horario');
-eq(r2.records[0].start_time, '10:30', 'Danna 10:30');
-eq(r2.records[1].start_time, '17:30', 'Coral 17:30 (inicio PM corregido)');
-eq(r2.records[1].end_time,   '22:00', 'Coral 22:00');
+eq(r2.records[0].start_time, '10:30', 'Dora 10:30');
+eq(r2.records[1].start_time, '17:30', 'Elsa 17:30 (inicio PM corregido)');
+eq(r2.records[1].end_time,   '22:00', 'Elsa 22:00');
 
 // ---------------------------------------------------------------------------
 console.log('\n' + '='.repeat(60));

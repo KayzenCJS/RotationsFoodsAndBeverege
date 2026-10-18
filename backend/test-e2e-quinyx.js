@@ -40,12 +40,12 @@ const ok = (v, m) => eq(!!v, true, m);
   eq(sched.every((r) => r.work_date === TEST_DATE), true, 'la fecha elegida se aplica a todas');
 
   console.log('\n=== 3. Ejemplo literal del usuario (§21) ===');
-  const anna = sched.find((r) => r.name === 'Anna Dragan' && r.location_name === 'Pixie/DD Kitchen');
-  const ral = sched.find((r) => r.name === 'Raluca' && r.location_name === 'Pixie/DD Kitchen');
-  const alexa = sched.find((r) => r.name === 'Alexa' && r.location_name === 'Pixie/DD Kitchen');
-  eq([anna.start_time, anna.end_time, anna.role, anna.shift_label], ['09:00', '17:00', 'Sales 1', 'Day'], 'Anna Dragan 09:00-17:00 Sales 1 [Day]');
-  eq([ral.start_time, ral.end_time, ral.role, ral.shift_label], ['17:00', '22:00', 'Sales 1', 'Night'], 'Raluca 17:00-22:00 Sales 1 [Night]');
-  eq([alexa.start_time, alexa.end_time, alexa.role], ['08:00', '22:00', 'Server'], 'Alexa 08:00-22:00 Server');
+  const turno = sched.find((r) => r.name === 'Nadia Castro' && r.location_name === 'Pixie/DD Kitchen');
+  const ral = sched.find((r) => r.name === 'Rocio' && r.location_name === 'Pixie/DD Kitchen');
+  const nadia = sched.find((r) => r.name === 'Nadia' && r.location_name === 'Pixie/DD Kitchen');
+  eq([turno.start_time, turno.end_time, turno.role, turno.shift_label], ['09:00', '17:00', 'Sales 1', 'Day'], 'Nadia Castro 09:00-17:00 Sales 1 [Day]');
+  eq([ral.start_time, ral.end_time, ral.role, ral.shift_label], ['17:00', '22:00', 'Sales 1', 'Night'], 'Rocio 17:00-22:00 Sales 1 [Night]');
+  eq([nadia.start_time, nadia.end_time, nadia.role], ['08:00', '22:00', 'Server'], 'Nadia 08:00-22:00 Server');
 
   console.log('\n=== 4. Matching contra la BD (nada se crea) ===');
   const employees = (await pool.query('SELECT id, name FROM employees')).rows;
@@ -139,12 +139,12 @@ const ok = (v, m) => eq(!!v, true, m);
       WHERE a.work_date = $1 AND a.source = 'excel'`, [TEST_DATE])).rows;
   eq(inDb.length, ready.length, inDb.length + ' asignaciones en la BD (solo las limpias)');
 
-  const rowAnna = inDb.find((r) => r.name === 'Anna Dragan' && r.location_id === 'pixie-kitchen');
-  eq([String(rowAnna.start_time).slice(0, 5), String(rowAnna.end_time).slice(0, 5)], ['09:00', '17:00'], 'Anna Dragan guardada 09:00-17:00 en pixie-kitchen');
-  const rowRal = inDb.find((r) => r.name === 'Raluca' && r.location_id === 'pixie-kitchen');
-  eq([String(rowRal.start_time).slice(0, 5), String(rowRal.end_time).slice(0, 5)], ['17:00', '22:00'], 'Raluca guardada 17:00-22:00 en pixie-kitchen');
+  const rowAnna = inDb.find((r) => r.name === 'Nadia Castro' && r.location_id === 'pixie-kitchen');
+  eq([String(rowAnna.start_time).slice(0, 5), String(rowAnna.end_time).slice(0, 5)], ['09:00', '17:00'], 'Nadia Castro guardada 09:00-17:00 en pixie-kitchen');
+  const rowRal = inDb.find((r) => r.name === 'Rocio' && r.location_id === 'pixie-kitchen');
+  eq([String(rowRal.start_time).slice(0, 5), String(rowRal.end_time).slice(0, 5)], ['17:00', '22:00'], 'Rocio guardada 17:00-22:00 en pixie-kitchen');
   eq(rowAnna.source, 'excel', 'source = excel');
-  ok(inDb.some((r) => r.name === 'Alexa' && r.location_id === 'pixie-kitchen'), 'Alexa guardada en pixie-kitchen');
+  ok(inDb.some((r) => r.name === 'Nadia' && r.location_id === 'pixie-kitchen'), 'Nadia guardada en pixie-kitchen');
 
   console.log('\n=== 8. Reimportar el mismo archivo -> duplicados, NO doblebooking (§18) ===');
   const sum2 = await importRoutes.commitImport({}, pool, {

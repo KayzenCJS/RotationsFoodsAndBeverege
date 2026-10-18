@@ -494,7 +494,7 @@ function groupIdIsValid(value) {
 //
 // Necesario porque el formulario de empleado tiene mas casillas que las de
 // capacitaciones: las de "Grupos adicionales", con los valores A, B, C y D. Un
-// selector generico las guardaba como certificaciones y Edward se quedo con
+// selector generico las guardaba como certificaciones y Eduardo se quedo con
 // cuatro filas que en realidad eran letras de grupo. Aqui se corta el problema
 // de raiz: una letra de grupo no es una capacitacion, y un valor vacio tampoco.
 //

@@ -16,7 +16,7 @@ console.log('\n== DETECCION DE TIPO (§2) ==');
 const schedHeaders=['Staff Name','Site','Shift Date','Shift Start','Shift End','Badge'];
 t('horario -> schedule', ()=>{
   const rows=[['Dan','Barnyard Pizza','2026-09-30','10:00 AM','2:00 PM','1001'],
-              ['Edward','Food Fair','2026-09-30','9:00 AM','5:00 PM','1003']];
+              ['Eduardo','Food Fair','2026-09-30','9:00 AM','5:00 PM','1003']];
   assert(E.detectType(schedHeaders,rows)==='schedule', 'esperaba schedule');
 });
 const tsHeaders=['Employee ID','Employee','Date','Clock In','Clock Out','Worked Hours','Regular Hours','Overtime'];
@@ -91,11 +91,11 @@ t('accento/apostrofo: "Dippins Dots" -> dippin-dots', ()=>{
 console.log('\n== MATCHING DE EMPLEADOS (§4) ==');
 const emps=[
  {id:6,name:'Dan',badge_number:'1001'},
- {id:21,name:'Claudeen Jimenez'},
- {id:23,name:'Cosmin'},
- {id:24,name:'Silviu'},
- {id:22,name:'Alexa'},
- {id:2,name:'Edward'}
+ {id:21,name:'Oriana Mendoza'},
+ {id:23,name:'Cesar'},
+ {id:24,name:'Sorin'},
+ {id:22,name:'Nadia'},
+ {id:2,name:'Eduardo'}
 ];
 t('nombre exacto -> confiante', ()=>{
   const r=E.matchEmployee({name:'Dan'},emps);
@@ -118,7 +118,7 @@ t('nombre inexistente -> null sin crear', ()=>{
   assert(r.employee===null,'debe ser null');
 });
 t('primer+apellido por partes', ()=>{
-  const r=E.matchEmployee({first_name:'Claudeen',last_name:'Jimenez'},emps);
+  const r=E.matchEmployee({first_name:'Oriana',last_name:'Mendoza'},emps);
   assert(r.employee && r.employee.id===21,'r='+JSON.stringify(r));
 });
 
