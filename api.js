@@ -122,6 +122,80 @@ async function createBuildingAssignment(locationId, data) {
     });
 }
 
+// ============================================
+// SECCIONES DEL HORARIO (OPS / EXTRA HOURS / SUPPORT / EXTRA TASKS)
+// ============================================
+
+async function fetchScheduleCategories() {
+    return await apiRequest('/schedule-categories');
+}
+
+async function createScheduleCategory(data) {
+    return await apiRequest('/schedule-categories', {
+        method: 'POST',
+        body: JSON.stringify(data)
+    });
+}
+
+async function deleteScheduleCategory(key) {
+    return await apiRequest(`/schedule-categories/${encodeURIComponent(key)}`, {
+        method: 'DELETE'
+    });
+}
+
+// ============================================
+// LOCATIONS ENTRENADAS Y GRUPOS DEL EMPLEADO
+// ============================================
+
+async function fetchLocationGroups() {
+    return await apiRequest('/location-groups');
+}
+
+async function fetchEmployeeTrainingLocations(employeeId) {
+    return await apiRequest(`/employees/${employeeId}/training-locations`);
+}
+
+async function saveEmployeeTrainingLocations(employeeId, data) {
+    return await apiRequest(`/employees/${employeeId}/training-locations`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    });
+}
+
+// Reporte de capacitaciones por empleado (solo lectura, para el modulo Reportes)
+async function fetchEmployeesTrainingReport() {
+    return await apiRequest('/employees-training-report');
+}
+
+// ============================================
+// NOTAS DEL DÍA
+// ============================================
+
+async function fetchScheduleNotes(date = null) {
+    const query = date ? `?date=${date}` : '';
+    return await apiRequest(`/schedule-notes${query}`);
+}
+
+async function createScheduleNote(data) {
+    return await apiRequest('/schedule-notes', {
+        method: 'POST',
+        body: JSON.stringify(data)
+    });
+}
+
+async function updateScheduleNote(id, data) {
+    return await apiRequest(`/schedule-notes/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    });
+}
+
+async function deleteScheduleNote(id) {
+    return await apiRequest(`/schedule-notes/${id}`, {
+        method: 'DELETE'
+    });
+}
+
 async function deleteAssignment(id) {
     return await apiRequest(`/assignments/${id}`, {
         method: 'DELETE'

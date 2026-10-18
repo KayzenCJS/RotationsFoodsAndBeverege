@@ -25,7 +25,17 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // Serve frontend files from project root
-app.use(express.static(path.join(__dirname, '..')));
+//
+// Sin cache: durante el desarrollo, si no, el navegador se queda con un
+// script.js viejo en memoria y se depura código que ya no existe en disco
+// (pasó con un fallo de night's turnos que parecía no estar arreglado).
+app.use(express.static(path.join(__dirname, '..'), {
+    etag: true,
+    lastModified: true,
+    setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    }
+}));
 
 // ============================================
 // HELPERS
@@ -84,7 +94,7 @@ app.get('/api/:type/employees', async (req, res) => {
             const foodsPool = getPool('foods');
             const result = await foodsPool.query(`
                 SELECT e.*,
-                       array_agg(DISTINCT et.training_name) as trainings,
+                       array_agg(DISTINCT et.training_name) FILTER (WHERE et.training_name IS NOT NULL) as trainings,
                        ea.is_on_break, ea.is_on_training, ea.is_day_off, ea.is_holiday,
                        ea.schedule_start_time, ea.schedule_end_time, ea.days_off, ea.holidays
                 FROM employees e
@@ -102,7 +112,7 @@ app.get('/api/:type/employees', async (req, res) => {
         } else {
             const result = await pool.query(`
                 SELECT e.*,
-                       array_agg(DISTINCT et.training_name) as trainings,
+                       array_agg(DISTINCT et.training_name) FILTER (WHERE et.training_name IS NOT NULL) as trainings,
                        ea.is_on_break, ea.is_on_training, ea.is_day_off, ea.is_holiday,
                    ea.schedule_start_time, ea.schedule_end_time, ea.days_off, ea.holidays
                 FROM employees e
@@ -124,7 +134,7 @@ app.get('/api/:type/employees/:id', async (req, res) => {
         const pool = getPool(req.params.type);
         const result = await pool.query(`
             SELECT e.*, 
-                   array_agg(DISTINCT et.training_name) as trainings,
+                   array_agg(DISTINCT et.training_name) FILTER (WHERE et.training_name IS NOT NULL) as trainings,
                    ea.is_on_break, ea.is_on_training, ea.is_day_off, ea.is_holiday,
                    ea.schedule_start_time, ea.schedule_end_time, ea.days_off, ea.holidays
             FROM employees e
@@ -144,10 +154,30 @@ app.post('/api/:type/employees', async (req, res) => {
     // Always use foods database for employee creation (Retail uses Foods employees)
     const client = getPool('foods');
     try {
-        const { name, nationality, age, role, group_id, hire_date, trainings, availability } = req.body;
+        const { name, nationality, age, role, group_id: groupIdRaw, hire_date, trainings, availability } = req.body;
+        // char(1): vacio se guarda como espacio = "Sin grupo".
+        const group_id = normalizeGroupId(groupIdRaw);
+
+        // hire_date vacio o ausente no debe romper el guardado.
+        const hireDateVacio = hire_date === undefined || hire_date === null || String(hire_date).trim() === '';
+        const hireDateFinal = hireDateVacio
+            ? new Date().toISOString().slice(0, 10)
+            : String(hire_date).slice(0, 10);
+        // Grupo D (Bistro) solo admite bartender / cashier / cook.
+        if (group_id === 'D' && !GROUP_D_ROLES.includes(String(role || '').toLowerCase())) {
+            return res.status(400).json({
+                error: 'invalid_group_role',
+                message: 'El Grupo D (Bistro) solo admite roles bartender, cashier o cook.'
+            });
+        }
+        // Grupo OPS/Supervisor. Si no viene, NULL: el empleado no es OPS.
+        const ops_group = normalizeOpsGroup(req.body.ops_group);
+
+        // Una letra de grupo no es una capacitacion (ver sanitizeTrainings).
+        const cleanTrainings = sanitizeTrainings(trainings);
 
         // Automatically determine if employee is versatile based on trainings
-        const trainingsArray = trainings || [];
+        const trainingsArray = cleanTrainings;
         const roleRequirements = {
             'cashier': ['pos-training', 'cash-register'],
             'server': ['customer-service', 'pos-training'],
@@ -171,16 +201,16 @@ app.post('/api/:type/employees', async (req, res) => {
         await client.query('BEGIN');
 
         const empResult = await client.query(
-            'INSERT INTO employees (name, nationality, age, role, group_id, hire_date, is_versatile) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
-            [name, nationality, age, role, group_id, hire_date || new Date().toISOString().split('T')[0], is_versatile]
+            'INSERT INTO employees (name, nationality, age, role, group_id, hire_date, is_versatile, ops_group) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
+            [name, nationality, age, role, group_id, hireDateFinal, is_versatile, ops_group]
         );
 
         const empId = empResult.rows[0].id;
 
         // Insert trainings
-        if (trainings && trainings.length > 0) {
+        if (cleanTrainings.length > 0) {
             // Insert trainings one by one to avoid parameter limit
-            for (const training of trainings) {
+            for (const training of cleanTrainings) {
                 await client.query(
                     'INSERT INTO employee_trainings (employee_id, training_name) VALUES ($1, $2) ON CONFLICT (employee_id, training_name) DO NOTHING',
                     [empId, training]
@@ -210,7 +240,7 @@ app.post('/api/:type/employees', async (req, res) => {
         // Fetch the complete employee data
         const result = await client.query(`
             SELECT e.*,
-                   array_agg(DISTINCT et.training_name) as trainings,
+                   array_agg(DISTINCT et.training_name) FILTER (WHERE et.training_name IS NOT NULL) as trainings,
                    ea.is_on_break, ea.is_on_training, ea.is_day_off, ea.is_holiday,
                    ea.schedule_start_time, ea.schedule_end_time, ea.days_off, ea.holidays
             FROM employees e
@@ -232,10 +262,30 @@ app.put('/api/:type/employees/:id', async (req, res) => {
     // Always use foods database for employee updates (Retail uses Foods employees)
     const client = getPool('foods');
     try {
-        const { name, nationality, age, role, group_id, hire_date, trainings, availability } = req.body;
+        const { name, nationality, age, role, group_id: groupIdRaw, hire_date, trainings, availability } = req.body;
+        // char(1): vacio se guarda como espacio = "Sin grupo".
+        const group_id = normalizeGroupId(groupIdRaw);
+
+        // hire_date vacio o ausente no debe romper el guardado.
+        const hireDateVacio = hire_date === undefined || hire_date === null || String(hire_date).trim() === '';
+        const hireDateFinal = hireDateVacio
+            ? new Date().toISOString().slice(0, 10)
+            : String(hire_date).slice(0, 10);
+        // Grupo D (Bistro) solo admite bartender / cashier / cook.
+        if (group_id === 'D' && !GROUP_D_ROLES.includes(String(role || '').toLowerCase())) {
+            return res.status(400).json({
+                error: 'invalid_group_role',
+                message: 'El Grupo D (Bistro) solo admite roles bartender, cashier o cook.'
+            });
+        }
+        // Grupo OPS/Supervisor. Si no viene, NULL: el empleado no es OPS.
+        const ops_group = normalizeOpsGroup(req.body.ops_group);
+
+        // Una letra de grupo no es una capacitacion (ver sanitizeTrainings).
+        const cleanTrainings = sanitizeTrainings(trainings);
 
         // Automatically determine if employee is versatile based on trainings
-        const trainingsArray = trainings || [];
+        const trainingsArray = cleanTrainings;
         const roleRequirements = {
             'cashier': ['pos-training', 'cash-register'],
             'server': ['customer-service', 'pos-training'],
@@ -256,27 +306,47 @@ app.put('/api/:type/employees/:id', async (req, res) => {
 
         const is_versatile = qualifiedRoles >= 3;
 
-        console.log('Update employee request:', { id: req.params.id, name, nationality, age, role, group_id, trainingsCount: trainings?.length });
+        console.log('Update employee request:', { id: req.params.id, name, nationality, age, role, group_id, trainingsCount: cleanTrainings.length });
 
         await client.query('BEGIN');
 
+        const hireFinal = hireDateVacio
+            ? ((await client.query('SELECT hire_date FROM employees WHERE id = $1', [req.params.id])).rows[0] || {}).hire_date
+            : hireDateFinal;
         await client.query(
-            'UPDATE employees SET name = $1, nationality = $2, age = $3, role = $4, group_id = $5, hire_date = $6, is_versatile = $7, updated_at = NOW() WHERE id = $8',
-            [name, nationality, age, role, group_id, hire_date, is_versatile, req.params.id]
+            'UPDATE employees SET name = $1, nationality = $2, age = $3, role = $4, group_id = $5, hire_date = $6, is_versatile = $7, ops_group = $8, updated_at = NOW() WHERE id = $9',
+            [name, nationality, age, role, group_id, hireFinal, is_versatile, ops_group, req.params.id]
         );
 
-        // Update trainings
-        await client.query('DELETE FROM employee_trainings WHERE employee_id = $1', [req.params.id]);
-        if (trainings && trainings.length > 0) {
-            console.log('Inserting trainings:', trainings.length);
-            // Insert trainings one by one to avoid parameter limit
-            for (const training of trainings) {
+        // Update trainings.
+        // ANTES: DELETE de todas y reinserción de las enviadas. Eso destruía las
+        // capacitaciones del empleado si el cliente enviaba la lista vacía o no
+        // la enviaba (por ejemplo al reenviar el GET, que sin FILTER traía
+        // [null]). Ahora solo se sincroniza lo que viene informado, y la
+        // diferencia se calcula para no borrar nada por accidente.
+        if (Array.isArray(trainings)) {
+            const deseadas = cleanTrainings;
+            const actuales = (await client.query(
+                'SELECT training_name FROM employee_trainings WHERE employee_id = $1',
+                [req.params.id])).rows.map((r) => r.training_name);
+
+            const aBorrar = actuales.filter((t) => !deseadas.includes(t));
+            const aAnadir = deseadas.filter((t) => !actuales.includes(t));
+
+            for (const t of aBorrar) {
+                await client.query(
+                    'DELETE FROM employee_trainings WHERE employee_id = $1 AND training_name = $2',
+                    [req.params.id, t]);
+            }
+            for (const t of aAnadir) {
                 await client.query(
                     'INSERT INTO employee_trainings (employee_id, training_name) VALUES ($1, $2) ON CONFLICT (employee_id, training_name) DO NOTHING',
-                    [req.params.id, training]
-                );
+                    [req.params.id, t]);
             }
+            console.log(`Trainings sync: -${aBorrar.length} +${aAnadir.length} (actual ${actuales.length} -> ${deseadas.length})`);
         }
+        // Si trainings no viene (undefined), no se toca nada: las capacitaciones
+        // del empleado quedan intactas.
 
         // Update or insert availability
         const availabilityExists = await client.query(
@@ -324,7 +394,7 @@ app.put('/api/:type/employees/:id', async (req, res) => {
         // Fetch the complete employee data
         const result = await client.query(`
             SELECT e.*,
-                   array_agg(DISTINCT et.training_name) as trainings,
+                   array_agg(DISTINCT et.training_name) FILTER (WHERE et.training_name IS NOT NULL) as trainings,
                    ea.is_on_break, ea.is_on_training, ea.is_day_off, ea.is_holiday,
                    ea.schedule_start_time, ea.schedule_end_time, ea.days_off, ea.holidays
             FROM employees e
@@ -395,25 +465,251 @@ app.get('/api/:type/locations/:id', async (req, res) => {
 // ASSIGNMENTS
 // ============================================
 
+// Tipos de asignación. LOCATION es el histórico y el valor por defecto.
+// NOSTALGIA_NIGHT son los turnos de tarde/noche: misma tabla `assignments`,
+// mismo empleado, misma fecha, pero assignment_type propio para que no se
+// mezclen con el horario diurno en la interfaz.
+const ASSIGNMENT_TYPES = ['LOCATION', 'OPS', 'EXTRA_HOURS', 'SUPPORT', 'EXTRA_TASK', 'NOSTALGIA_NIGHT'];
+
+// Grupos OPS/Supervisor validos (seccion 1). NULL = el empleado no es OPS.
+const OPS_GROUPS = ['front_ops', 'ff-pav_ops', 'back_ops', 'oasis-dutch_ops'];
+
+// Grupo D (Bistro / Dunkin' Donuts). Solo estos tres roles pueden estar en el:
+// un bartender, cashier o cook. Cualquier otro rol se rechaza al guardar.
+const GROUP_D_ROLES = ['bartender', 'cashier', 'cook'];
+
+// employees.group_id es char(1) y PostgreSQL guarda '' como un espacio.
+// Se normaliza siempre a ' ' para que la app muestre "Sin grupo".
+function normalizeGroupId(value) {
+    const v = String(value == null ? '' : value).trim().toUpperCase().charAt(0);
+    if (['A', 'B', 'C', 'D'].includes(v)) return v;
+    return ' ';                      // sin grupo
+}
+
+function groupIdIsValid(value) {
+    return ['A', 'B', 'C', 'D', ' ', ''].includes(String(value == null ? ' ' : value).trim().toUpperCase().charAt(0) || ' ');
+}
+
+// Filtra la lista de capacitaciones que llega del cliente.
+//
+// Necesario porque el formulario de empleado tiene mas casillas que las de
+// capacitaciones: las de "Grupos adicionales", con los valores A, B, C y D. Un
+// selector generico las guardaba como certificaciones y Edward se quedo con
+// cuatro filas que en realidad eran letras de grupo. Aqui se corta el problema
+// de raiz: una letra de grupo no es una capacitacion, y un valor vacio tampoco.
+//
+// No se aplica una lista blanca de las capacitaciones conocidas: el catalogo
+// son los propios datos, y tiene que poder crecer sin tocar codigo.
+function sanitizeTrainings(trainings) {
+    if (!Array.isArray(trainings)) return [];
+    const vistos = new Set();
+    const fuera = [];
+    for (const raw of trainings) {
+        const t = String(raw == null ? '' : raw).trim();
+        if (!t) continue;                                  // vacio
+        if (['A', 'B', 'C', 'D'].includes(t.toUpperCase()) && t.length === 1) {
+            fuera.push(t); continue;                       // letra de grupo
+        }
+        if (vistos.has(t)) continue;                       // duplicado
+        vistos.add(t);
+    }
+    if (fuera.length) {
+        console.warn('[employees] princípios de grupo descartados de las capacitaciones: ' +
+                     fuera.join(', '));
+    }
+    return [...vistos];
+}
+
+// El rol administrativo solo habilita estas certificaciones: nada de
+// habilidades operativas, nada de limpieza y seguridad.
+const ADMIN_TRAININGS = [
+    'dunkin-trained',
+    'food-safety',
+    'pos-training',
+    'nh-alcohol-certification'
+];
+
+function normalizeOpsGroup(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const v = String(value).trim().toLowerCase().replace(/\s+/g, '-');
+    return OPS_GROUPS.includes(v) ? v : null;
+}
+
+// Normaliza el tipo. Si no viene, o solo viene location_id, es LOCATION:
+// exactamente el comportamiento de antes de la extensión.
+function normalizeAssignmentType(value, locationId) {
+    const v = String(value == null ? '' : value).trim().toUpperCase().replace(/[\s-]+/g, '_');
+    if (ASSIGNMENT_TYPES.includes(v)) return v;
+    return locationId ? 'LOCATION' : 'LOCATION';
+}
+
+// ============================================================================
+//  MODULO DE INSPECCIONES — helpers
+// Un turno de noche (20:00 -> 01:00) tiene end_time < start_time. PostgreSQL
+// compara bien las horas, pero la condición de solapamiento "empieza antes de
+// que acabe el otro" da un resultado equivocado: un turno que acaba a la 01:00
+// parecería terminar antes de empezar.
+//
+// Para evitarlo, todo turno con end_time <= start_time se interpreta como que
+// termina al día siguiente y se cuenta en minutos con un +24h. La work_date
+// sigue siendo SIEMPRE la del inicio: es la fecha en la que se planifica el
+// turno, no la del final. Esto permite que un turno de 20:00 a 01:00 se
+// registre correctamente y que se detecte el conflicto real con el turno de la
+// madrugada siguiente.
+function minutos(time) {
+    if (time == null) return null;
+    const t = String(time).trim();
+    if (!t) return null;
+    const [h, m] = t.split(':');
+    return (parseInt(h, 10) || 0) * 60 + (parseInt(m, 10) || 0);
+}
+
+// Minutos que ocupa el turno. Si cruza la medianoche, el final lleva +24h.
+function minutosTurno(startTime, endTime) {
+    const s = minutos(startTime);
+    const e = minutos(endTime);
+    if (s == null || e == null) return null;
+    return { inicio: s, fin: e <= s ? e + 1440 : e, cruzaMedianoche: e <= s };
+}
+
+// work_date + 1 dia, en texto. Se usa para buscar los turnos de la madrugada
+// siguiente, que es a donde se prolonga un turno nocturno.
+function diaSiguiente(fechaISO) {
+    const d = new Date(String(fechaISO) + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+}
+
+// Busca un turno que se solape con el indicado.
+//
+// Se comparan minutos sobre una linea de tiempo continua: los turnos que
+// cruzan la medianoche se prolongan 24h. Por eso hay que mirar tambien los
+// turnos del dia siguiente (un turno de 20:00-01:00 pisa la madrugada de
+// mañana) y por eso los turnos de mañana que ya cruzan la noche anterior se
+// recortan a su parte de hoy antes de compararlos.
+//
+// Devuelve la fila en conflicto, o null.
+async function buscarConflicto(pool, { employee_id, work_date, turno, excludeId }) {
+    const manana = diaSiguiente(work_date);
+    const ayer = diaSiguiente(work_date) === work_date ? null : diaAnterior(work_date);
+
+    const res = await pool.query(
+        `SELECT a.id, a.location_id, a.category, a.assignment_type,
+                a.work_date::text AS work_date, a.start_time, a.end_time,
+                sc.name_es AS section_name
+           FROM assignments a
+           LEFT JOIN schedule_categories sc ON sc.key = a.category
+          WHERE a.employee_id = $1
+            AND a.work_date IN ($2, $3)`,
+        [employee_id, work_date, manana]
+    );
+    // Tambien los turnos del dia anterior que se prolongan hacia hoy.
+    if (ayer) {
+        const resAyer = await pool.query(
+            `SELECT a.id, a.location_id, a.category, a.assignment_type,
+                    a.work_date::text AS work_date, a.start_time, a.end_time,
+                    sc.name_es AS section_name
+               FROM assignments a
+               LEFT JOIN schedule_categories sc ON sc.key = a.category
+              WHERE a.employee_id = $1
+                AND a.work_date = $2`,
+            [employee_id, ayer]
+        );
+        res.rows.push(...resAyer.rows);
+    }
+
+    for (const row of res.rows) {
+        if (excludeId && Number(row.id) === Number(excludeId)) continue;
+        const otro = minutosTurno(row.start_time, row.end_time);
+        if (!otro) continue;
+
+        // Tramo que ocupa ESTE turno sobre la linea continua:
+        // hoy arranca en 0 y si cruza la medianoche llega a 1440+.
+        const miInicio = turno.inicio;
+        const miFin = turno.fin;
+
+        // Tramo del turno existente. Si empieza ayer y cruza la medianoche,
+        // su parte de HOY empieza en 0.
+        const esAyer = ayer && row.work_date === ayer;
+        const esHoy = row.work_date === work_date;
+        let s = otro.inicio;
+        let f = otro.fin;
+        if (esAyer) {
+            // Solo nos interesa el trozo que invade hoy: de 00:00 a su fin.
+            if (!otro.cruzaMedianoche) continue;
+            s = 0;
+            f = otro.fin - 1440;
+            if (f <= 0) continue;
+        } else if (!esHoy) {
+            // El turno es de manana y el nuevo no cruza: no se solapan.
+            if (!turno.cruzaMedianoche) continue;
+            s = otro.inicio;
+            f = otro.fin;
+        } else if (otro.cruzaMedianoche && turno.cruzaMedianoche) {
+            // Los dos cruzan la medianoche: se comparan sobre 24h+
+            s = otro.inicio;
+            f = otro.fin;
+        }
+
+        if (miInicio < f && miFin > s) return row;
+    }
+    return null;
+}
+
+function diaAnterior(fechaISO) {
+    const d = new Date(String(fechaISO) + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().slice(0, 10);
+}
+
+// Normaliza la categoría ("lugar") de la asignación.
+// Para LOCATION la categoría ES el location_id, de modo que las filas que ya
+// existían y las nuevas se comportan igual. Para el resto es la clave de la
+// sección (front_ops, pavilion-support, ...).
+function normalizeCategory(type, locationId, value) {
+    if (type === 'LOCATION') return locationId || null;
+    const v = String(value == null ? '' : value).trim().toLowerCase().replace(/\s+/g, '-');
+    return v ? v.slice(0, 50) : null;
+}
+
+// Nombre legible del "lugar" para los mensajes de conflicto: la location si la
+// hay, y si no el nombre real de la sección (Front OPS, Pavilion Support...)
+// que es lo que el usuario ve en pantalla. Si no se conoce la sección, se cae
+// a la clave para no mostrar un hueco.
+function conflictPlaceName(row) {
+    if (row.location_id) return row.location_id;
+    if (row.section_name) return row.section_name;
+    if (row.category) return row.category.replace(/-/g, ' ');
+    return 'otra sección';
+}
+
 // Get all assignments
 app.get('/api/:type/assignments', async (req, res) => {
     try {
         const pool = getPool(req.params.type);
         const { date } = req.query;
+        // LEFT JOIN en ambos: las asignaciones de OPS / Extra Hours / Support /
+        // Extra Tasks no tienen location_id, y con un INNER JOIN desaparecerían
+        // del horario sin avisar. sc da el nombre de la sección.
         let query = `
             SELECT a.*, e.name as employee_name, e.role as employee_role, e.group_id,
-                   l.name as location_name
+                   e.ops_group as employee_ops_group,
+                   l.name as location_name,
+                   sc.name_es as section_name, sc.name_en as section_name_en,
+                   sc.section as section, sc.icon as section_icon
             FROM assignments a
             JOIN employees e ON a.employee_id = e.id
-            JOIN locations l ON a.location_id = l.id
+            LEFT JOIN locations l ON a.location_id = l.id
+            LEFT JOIN schedule_categories sc ON sc.key = a.category
         `;
         const params = [];
         if (date) {
             query += ' WHERE a.work_date = $1';
             params.push(date);
         }
-        query += ' ORDER BY a.work_date DESC, l.name';
-        
+        query += ` ORDER BY a.work_date DESC,
+                   COALESCE(l.name, sc.name_es, ''), a.start_time NULLS LAST`;
+
         const result = await pool.query(query, params);
         res.json(result.rows);
     } catch (err) {
@@ -476,74 +772,76 @@ app.post('/api/:type/assignments', async (req, res) => {
         const pool = getPool(req.params.type);
         const { location_id, employee_id, work_date, start_time, end_time } = req.body;
 
-        // Check if location is disabled for this date
-        const disableCheck = await pool.query(
-            `SELECT * FROM location_disables
-             WHERE location_id = $1
-             AND disable_date = $2
-             AND enabled_at IS NULL
-             AND (reactivation_date IS NULL OR reactivation_date > $2)`,
-            [location_id, work_date]
-        );
+        // Campos de las secciones nuevas (OPS, Extra Hours, Support, Extra
+        // Tasks). Si no vienen, se comporta exactamente como antes.
+        const assignment_type = normalizeAssignmentType(req.body.assignment_type, location_id);
+        const category = normalizeCategory(assignment_type, location_id, req.body.category);
+        const role = req.body.role ? String(req.body.role).slice(0, 50) : null;
+        const notes = req.body.notes ? String(req.body.notes).slice(0, 2000) : null;
+        const task_id = req.body.task_id ? Number(req.body.task_id) : null;
 
-        if (disableCheck.rows.length > 0) {
-            const disable = disableCheck.rows[0];
-            return res.status(400).json({
-                error: 'location_disabled',
-                message: `La locación ${location_id} está cerrada para la fecha ${work_date}. Motivo: ${disable.disable_reason}. No se pueden crear asignaciones.`
-            });
-        }
-
-        // For Retail, also check for conflicts in Foods assignments
-        if (req.params.type === 'retail') {
-            const foodsPool = getPool('foods');
-            const foodsConflictCheck = await foodsPool.query(
-                `SELECT location_id, start_time, end_time
-                 FROM assignments
-                 WHERE employee_id = $1
-                 AND work_date = $2
-                 AND (
-                     (start_time < $3 AND end_time > $4) OR
-                     (start_time < $3 AND end_time >= $3) OR
-                     (start_time <= $4 AND end_time > $4)
-                 )`,
-                [employee_id, work_date, end_time, start_time]
+        // Las secciones no geográficas no son locations: se salta la comprobación
+        // de cierre por día, que solo aplica a locations reales.
+        if (assignment_type === 'LOCATION') {
+            const disableCheck = await pool.query(
+                `SELECT * FROM location_disables
+                 WHERE location_id = $1
+                 AND disable_date = $2
+                 AND enabled_at IS NULL
+                 AND (reactivation_date IS NULL OR reactivation_date > $2)`,
+                [location_id, work_date]
             );
 
-            if (foodsConflictCheck.rows.length > 0) {
-                const conflict = foodsConflictCheck.rows[0];
+            if (disableCheck.rows.length > 0) {
+                const disable = disableCheck.rows[0];
                 return res.status(400).json({
-                    error: 'schedule_conflict',
-                    message: `El empleado ya tiene una asignación en Foods (${conflict.location_id}) durante el horario ${conflict.start_time} - ${conflict.end_time}. No puede estar en dos locaciones al mismo tiempo.`
+                    error: 'location_disabled',
+                    message: `La locación ${location_id} está cerrada para la fecha ${work_date}. Motivo: ${disable.disable_reason}. No se pueden crear asignaciones.`
                 });
             }
         }
 
-        // Check for time conflicts with existing assignments in current type
-        const conflictCheck = await pool.query(
-            `SELECT location_id, start_time, end_time
-             FROM assignments
-             WHERE employee_id = $1
-             AND work_date = $2
-             AND (
-                 (start_time < $3 AND end_time > $4) OR
-                 (start_time < $3 AND end_time >= $3) OR
-                 (start_time <= $4 AND end_time > $4)
-             )`,
-            [employee_id, work_date, end_time, start_time]
-        );
-
-        if (conflictCheck.rows.length > 0) {
-            const conflict = conflictCheck.rows[0];
-            return res.status(400).json({
-                error: 'schedule_conflict',
-                message: `El empleado ya tiene una asignación en ${conflict.location_id} durante el horario ${conflict.start_time} - ${conflict.end_time}. No puede estar en dos locaciones al mismo tiempo.`
+        // Detecta si el empleado se solapa con un turno que ya tiene.
+        //
+        // Se hace en JavaScript y no con una comparación de horas en SQL porque
+        // un turno de noche (20:00 -> 01:00) necesita contar hasta las 25:00, y
+        // además ocupa la madrugada del día siguiente: ahí es donde aparecen
+        // los conflictos de verdad.
+        const turno = minutosTurno(start_time, end_time);
+        if (turno) {
+            const conflicto = await buscarConflicto(pool, {
+                employee_id, work_date, turno, excludeId: null
             });
+            if (conflicto) {
+                return res.status(400).json({
+                    error: 'schedule_conflict',
+                    message: `El empleado ya tiene una asignación en ${conflictPlaceName(conflicto)} durante el horario ${conflicto.start_time} - ${conflicto.end_time}. No puede estar en dos lugares al mismo tiempo.`
+                });
+            }
+
+            // En Retail el mismo empleado puede tener turno en Foods. Se
+            // comprueba alli tambien, porque el horario es compartido.
+            if (req.params.type === 'retail') {
+                const confFoods = await buscarConflicto(getPool('foods'), {
+                    employee_id, work_date, turno, excludeId: null
+                });
+                if (confFoods) {
+                    return res.status(400).json({
+                        error: 'schedule_conflict',
+                        message: `El empleado ya tiene una asignación en Foods (${conflictPlaceName(confFoods)}) durante el horario ${confFoods.start_time} - ${confFoods.end_time}. No puede estar en dos lugares al mismo tiempo.`
+                    });
+                }
+            }
         }
 
         const result = await pool.query(
-            'INSERT INTO assignments (location_id, employee_id, work_date, start_time, end_time) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-            [location_id, employee_id, work_date, start_time, end_time]
+            `INSERT INTO assignments
+                (location_id, employee_id, work_date, start_time, end_time,
+                 assignment_type, category, role, notes, task_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+             RETURNING id`,
+            [location_id, employee_id, work_date, start_time, end_time,
+             assignment_type, category, role, notes, task_id]
         );
 
         // Trigger automatic backup after assignment creation
@@ -562,50 +860,54 @@ app.put('/api/:type/assignments/:id', async (req, res) => {
         const { location_id, employee_id, work_date, start_time, end_time } = req.body;
         const assignmentId = req.params.id;
 
-        // Check if location is disabled for this date
-        const disableCheck = await pool.query(
-            `SELECT * FROM location_disables
-             WHERE location_id = $1
-             AND disable_date = $2
-             AND enabled_at IS NULL
-             AND (reactivation_date IS NULL OR reactivation_date > $2)`,
-            [location_id, work_date]
-        );
+        const assignment_type = normalizeAssignmentType(req.body.assignment_type, location_id);
+        const category = normalizeCategory(assignment_type, location_id, req.body.category);
+        const role = req.body.role ? String(req.body.role).slice(0, 50) : null;
+        const notes = req.body.notes ? String(req.body.notes).slice(0, 2000) : null;
+        const task_id = req.body.task_id ? Number(req.body.task_id) : null;
 
-        if (disableCheck.rows.length > 0) {
-            const disable = disableCheck.rows[0];
-            return res.status(400).json({
-                error: 'location_disabled',
-                message: `La locación ${location_id} está cerrada para la fecha ${work_date}. Motivo: ${disable.disable_reason}. No se pueden crear asignaciones.`
-            });
+        // El cierre por día solo aplica a locations reales.
+        if (assignment_type === 'LOCATION') {
+            const disableCheck = await pool.query(
+                `SELECT * FROM location_disables
+                 WHERE location_id = $1
+                 AND disable_date = $2
+                 AND enabled_at IS NULL
+                 AND (reactivation_date IS NULL OR reactivation_date > $2)`,
+                [location_id, work_date]
+            );
+
+            if (disableCheck.rows.length > 0) {
+                const disable = disableCheck.rows[0];
+                return res.status(400).json({
+                    error: 'location_disabled',
+                    message: `La locación ${location_id} está cerrada para la fecha ${work_date}. Motivo: ${disable.disable_reason}. No se pueden crear asignaciones.`
+                });
+            }
         }
 
-        // Check for time conflicts with existing assignments in ANY location (excluding current assignment)
-        const conflictCheck = await pool.query(
-            `SELECT location_id, start_time, end_time
-             FROM assignments
-             WHERE employee_id = $1
-             AND work_date = $2
-             AND id != $3
-             AND (
-                 (start_time < $4 AND end_time > $5) OR
-                 (start_time < $4 AND end_time >= $4) OR
-                 (start_time <= $5 AND end_time > $5)
-             )`,
-            [employee_id, work_date, assignmentId, end_time, start_time]
-        );
-
-        if (conflictCheck.rows.length > 0) {
-            const conflict = conflictCheck.rows[0];
-            return res.status(400).json({
-                error: 'schedule_conflict',
-                message: `El empleado ya tiene una asignación en ${conflict.location_id} durante el horario ${conflict.start_time} - ${conflict.end_time}. No puede estar en dos locaciones al mismo tiempo.`
+        // Mismo criterio que al crear: minutos continuos y turnos que cruzan la
+        // medianoche. Se excluye la propia asignacion que se esta editando.
+        const turno = minutosTurno(start_time, end_time);
+        if (turno) {
+            const conflicto = await buscarConflicto(pool, {
+                employee_id, work_date, turno, excludeId: assignmentId
             });
+            if (conflicto) {
+                return res.status(400).json({
+                    error: 'schedule_conflict',
+                    message: `El empleado ya tiene una asignación en ${conflictPlaceName(conflicto)} durante el horario ${conflicto.start_time} - ${conflicto.end_time}. No puede estar en dos lugares al mismo tiempo.`
+                });
+            }
         }
 
         const result = await pool.query(
-            'UPDATE assignments SET location_id = $1, employee_id = $2, work_date = $3, start_time = $4, end_time = $5 WHERE id = $6 RETURNING *',
-            [location_id, employee_id, work_date, start_time, end_time, assignmentId]
+            `UPDATE assignments
+                SET location_id = $1, employee_id = $2, work_date = $3, start_time = $4, end_time = $5,
+                    assignment_type = $6, category = $7, role = $8, notes = $9, task_id = $10
+              WHERE id = $11 RETURNING *`,
+            [location_id, employee_id, work_date, start_time, end_time,
+             assignment_type, category, role, notes, task_id, assignmentId]
         );
 
         // Trigger automatic backup after assignment update
@@ -641,6 +943,305 @@ app.delete('/api/:type/assignments/:id', async (req, res) => {
         const pool = getPool(req.params.type);
         await pool.query('DELETE FROM assignments WHERE id = $1', [req.params.id]);
         res.json({ message: 'Assignment deleted' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ============================================
+// SECCIONES DEL HORARIO (OPS / EXTRA HOURS / SUPPORT / EXTRA TASKS)
+// ============================================
+// Son datos, no código: añadir una actividad nueva es insertar una fila, sin
+// tocar el frontend.
+
+app.get('/api/:type/schedule-categories', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        const result = await pool.query(
+            `SELECT sc.*, t.title as task_title, t.status as task_status
+               FROM schedule_categories sc
+               LEFT JOIN tasks t ON t.id = sc.task_id
+              WHERE sc.is_active
+              ORDER BY sc.section, sc.sort_order, sc.key`
+        );
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/:type/schedule-categories', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        const { key, section, name_es, name_en, icon, sort_order, task_id } = req.body;
+        if (!key || !section || !name_es) {
+            return res.status(400).json({ error: 'missing_fields' });
+        }
+        if (!['OPS', 'EXTRA_HOURS', 'SUPPORT', 'EXTRA_TASK'].includes(section)) {
+            return res.status(400).json({ error: 'invalid_section' });
+        }
+        const result = await pool.query(
+            `INSERT INTO schedule_categories
+                (key, section, name_es, name_en, icon, sort_order, task_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)
+             ON CONFLICT (key) DO UPDATE
+                SET section = EXCLUDED.section, name_es = EXCLUDED.name_es,
+                    name_en = EXCLUDED.name_en, icon = EXCLUDED.icon,
+                    sort_order = EXCLUDED.sort_order, task_id = EXCLUDED.task_id
+             RETURNING *`,
+            [String(key).trim().toLowerCase().replace(/\s+/g, '-').slice(0, 50), section,
+             String(name_es).slice(0, 100), String(name_en || name_es).slice(0, 100),
+             icon ? String(icon).slice(0, 20) : null,
+             Number(sort_order) || 100, task_id ? Number(task_id) : null]
+        );
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Baja lógica: una sección con historial no se borra, se desactiva.
+app.delete('/api/:type/schedule-categories/:key', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        const { key } = req.params;
+        const used = await pool.query(
+            'SELECT count(*)::int n FROM assignments WHERE category = $1', [key]);
+        if (used.rows[0].n > 0) {
+            await pool.query('UPDATE schedule_categories SET is_active = false WHERE key = $1', [key]);
+            return res.json({
+                deactivated: true,
+                assignments: used.rows[0].n,
+                message: 'La sección tiene asignaciones: se desactiva en lugar de borrarse.'
+            });
+        }
+        await pool.query('DELETE FROM schedule_categories WHERE key = $1', [key]);
+        res.json({ deleted: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ============================================
+// LOCATIONS DONDE HA SIDO ENTRENADO + GRUPOS MULTIPLES
+// ============================================
+// Fuente de los grupos: el empleado marca las locations en las que se ha
+// entrenado, y de ahi se le asignan uno o varios grupos. Quien ha estado en
+// todas las locations tiene, simplemente, todas las marcadas.
+
+// Que grupos corresponden a cada location.
+//
+// El catalogo se sirve siempre desde foods: es donde vive el roster de
+// empleados (incluso cuando se consulta desde el tema retail) y, por tanto,
+// donde se guardan las locations entrenadas. Servir el mismo catalogo en los
+// dos temas evita que el formulario ofrezca locations que luego no se puedan
+// guardar (la FK las rechazaria con un error de servidor).
+app.get('/api/:type/location-groups', async (req, res) => {
+    try {
+        const result = await getPool('foods').query(`
+            SELECT lg.location_id, lg.group_id, l.name AS location_name
+              FROM location_groups lg
+              LEFT JOIN locations l ON l.id = lg.location_id
+             ORDER BY lg.group_id, l.name
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET de las locations entrenadas de un empleado + sus grupos.
+// Siempre contra foods: el empleado, y su historial de capacitacion, viven
+// ahi, se consulte el tema que se consulte.
+app.get('/api/:type/employees/:id/training-locations', async (req, res) => {
+    try {
+        const pool = getPool('foods');
+        const id = Number(req.params.id);
+        const locs = (await pool.query(
+            'SELECT location_id, trained_at::text FROM employee_location_training WHERE employee_id = $1 ORDER BY location_id',
+            [id])).rows;
+        const groups = (await pool.query(
+            'SELECT group_id FROM employee_groups WHERE employee_id = $1 ORDER BY group_id',
+            [id])).rows.map((r) => r.group_id);
+        const emp = (await pool.query(
+            'SELECT id, name, role, group_id FROM employees WHERE id = $1', [id])).rows[0] || null;
+        res.json({
+            employee_id: id,
+            primary_group: emp ? emp.group_id : null,
+            groups,
+            locations: locs,
+            // Todos los grupos que se deducen de las locations marcadas.
+            derived_groups: (await pool.query(
+                `SELECT DISTINCT lg.group_id FROM employee_location_training elt
+                   JOIN location_groups lg ON lg.location_id = elt.location_id
+                  WHERE elt.employee_id = $1 ORDER BY lg.group_id`, [id])).rows.map((r) => r.group_id)
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Reemplaza las locations entrenadas y los grupos adicionales del empleado.
+// Va siempre a foods (donde vive el empleado) y descarta en silencio lo que no
+// exista, devolviendo 400 en vez de reventar con un 500 de FK.
+app.put('/api/:type/employees/:id/training-locations', async (req, res) => {
+    try {
+        const pool = getPool('foods');
+        const id = Number(req.params.id);
+        const locations = Array.isArray(req.body.locations) ? req.body.locations : [];
+        const groups = Array.isArray(req.body.groups) ? req.body.groups : [];
+
+        const existe = (await pool.query('SELECT 1 FROM employees WHERE id = $1', [id])).rows.length;
+        if (!existe) return res.status(404).json({ error: 'employee_not_found' });
+
+        // Los grupos se validan contra el catalogo existente.
+        const validos = groups
+            .map((g) => String(g).trim().toUpperCase().charAt(0))
+            .filter((g) => ['A', 'B', 'C', 'D'].includes(g));
+
+        // Las locations se validan contra el catalogo de locations: se ignora
+        // lo que no exista y se avisa, para que un dato equivocado no se pierda
+        // en silencio ni aparezca como si se hubiera guardado.
+        // Se comprueba `locations` y no `location_groups` porque una location
+        // puede existir aun sin grupo asignado (todavia no decided cual es):
+        // el grupo solo hace falta para deducir grupos, no para saber si la
+        // persona estuvo entrenada ahi.
+        const pedidas = [...new Set(locations.map((l) => String(l).trim()).filter(Boolean))];
+        const conocidas = pedidas.length
+            ? (await pool.query('SELECT id FROM locations WHERE id = ANY($1)',
+                [pedidas])).rows.map((r) => r.id)
+            : [];
+        const descartadas = pedidas.filter((l) => !conocidas.includes(l));
+        const aGuardar = pedidas.filter((l) => conocidas.includes(l));
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            await client.query('DELETE FROM employee_location_training WHERE employee_id = $1', [id]);
+            for (const loc of aGuardar) {
+                await client.query(
+                    `INSERT INTO employee_location_training (employee_id, location_id)
+                     VALUES ($1,$2) ON CONFLICT (employee_id, location_id) DO NOTHING`, [id, loc]);
+            }
+            await client.query('DELETE FROM employee_groups WHERE employee_id = $1', [id]);
+            for (const g of [...new Set(validos)]) {
+                await client.query(
+                    'INSERT INTO employee_groups (employee_id, group_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+                    [id, g]);
+            }
+            await client.query('COMMIT');
+        } catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        } finally {
+            client.release();
+        }
+
+        const out = (await pool.query(
+            'SELECT location_id FROM employee_location_training WHERE employee_id = $1 ORDER BY location_id',
+            [id])).rows.map((r) => r.location_id);
+        const g = (await pool.query(
+            'SELECT group_id FROM employee_groups WHERE employee_id = $1 ORDER BY group_id',
+            [id])).rows.map((r) => r.group_id);
+        res.json({ employee_id: id, locations: out, groups: g, discarded_locations: descartadas });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Reporte de capacitaciones por empleado: para el modulo de Reportes.
+// NO es el gestor de empleados: aqui solo se consulta, no se edita.
+// Se lee de foods porque es ahi donde vive el roster.
+app.get('/api/:type/employees-training-report', async (req, res) => {
+    try {
+        const result = await getPool('foods').query(`
+            SELECT e.id, e.name, e.role, e.group_id AS primary_group,
+                   e.ops_group, e.is_versatile,
+                   COALESCE(t.cnt, 0)::int AS trainings_count,
+                   COALESCE(lt.locs, ARRAY[]::text[]) AS trained_locations,
+                   COALESCE(g.groups, ARRAY[]::text[]) AS extra_groups,
+                   COALESCE(dg.groups, ARRAY[]::text[]) AS derived_groups
+              FROM employees e
+              LEFT JOIN (SELECT employee_id, count(*)::int cnt FROM employee_trainings
+                          GROUP BY employee_id) t ON t.employee_id = e.id
+              LEFT JOIN (SELECT employee_id, array_agg(location_id ORDER BY location_id) AS locs
+                           FROM employee_location_training GROUP BY employee_id) lt ON lt.employee_id = e.id
+              LEFT JOIN (SELECT employee_id, array_agg(group_id ORDER BY group_id) AS groups
+                           FROM employee_groups GROUP BY employee_id) g ON g.employee_id = e.id
+              LEFT JOIN (SELECT elt.employee_id, array_agg(DISTINCT lg.group_id ORDER BY lg.group_id) AS groups
+                           FROM employee_location_training elt
+                           JOIN location_groups lg ON lg.location_id = elt.location_id
+                          GROUP BY elt.employee_id) dg ON dg.employee_id = e.id
+             ORDER BY e.name
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ============================================
+// NOTAS DEL DÍA
+// ============================================
+
+app.get('/api/:type/schedule-notes', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        const { date } = req.query;
+        let query = 'SELECT * FROM schedule_notes';
+        const params = [];
+        if (date) { query += ' WHERE work_date = $1'; params.push(date); }
+        query += ' ORDER BY work_date DESC, id';
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/:type/schedule-notes', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        const { work_date, note, created_by } = req.body;
+        if (!work_date || !note || !String(note).trim()) {
+            return res.status(400).json({ error: 'missing_fields' });
+        }
+        const result = await pool.query(
+            `INSERT INTO schedule_notes (work_date, note, created_by)
+             VALUES ($1,$2,$3) RETURNING *`,
+            [work_date, String(note).trim().slice(0, 2000),
+             created_by ? String(created_by).slice(0, 100) : null]
+        );
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/:type/schedule-notes/:id', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        const { note } = req.body;
+        if (!note || !String(note).trim()) {
+            return res.status(400).json({ error: 'missing_fields' });
+        }
+        const result = await pool.query(
+            `UPDATE schedule_notes SET note = $1, updated_at = CURRENT_TIMESTAMP
+              WHERE id = $2 RETURNING *`,
+            [String(note).trim().slice(0, 2000), Number(req.params.id)]
+        );
+        if (!result.rows.length) return res.status(404).json({ error: 'not_found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/:type/schedule-notes/:id', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        await pool.query('DELETE FROM schedule_notes WHERE id = $1', [Number(req.params.id)]);
+        res.json({ message: 'Note deleted' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -856,6 +1457,15 @@ app.delete('/api/:type/supervisor-assignments/:id', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// ============================================
+// INSPECTIONS & COMPLIANCE
+// ============================================
+// Los endpoints de inspecciones, hallazgos y correcciones viven en
+// inspections-routes.js, que se monta al final de este archivo. Se movieron
+// ahi porque el modulo crecio (validaciones de relaciones, borrado logico,
+// catalogos y consulta por locacion) y ya no cabia razonablemente junto al
+// resto de la API.
 
 // ============================================
 // ASSIGNMENT HISTORY
@@ -1146,12 +1756,22 @@ app.post('/api/:type/breaks', async (req, res) => {
 
                 // Count employees who will be working during the break interval
                 // An employee is working during the break if their shift overlaps with the break time
+                //
+                // Se comparan minutos (y no horas crudas) para que un turno de
+                // noche que cruza la medianoche cuente tambien: si no, un
+                // descanso de 00:30 contaria como "sin cobertura" aunque el
+                // turno de 20:00-01:00 siga activo.
+                const tramoDescanso = minutosTurno(break_start_time, break_end_time);
                 const employeesDuringBreak = assignments.rows.filter(a => {
                     if (a.employee_id === employee_id) return false; // Exclude the employee taking break
-
-                    // Check if the employee's shift overlaps with the break interval
-                    // Overlap condition: (start_time < break_end_time) AND (end_time > break_start_time)
-                    return a.start_time < break_end_time && a.end_time > break_start_time;
+                    const tramo = minutosTurno(a.start_time, a.end_time);
+                    if (!tramo || !tramoDescanso) return false;
+                    const solapa = tramo.inicio < tramoDescanso.fin && tramo.fin > tramoDescanso.inicio;
+                    // Un turno que empieza el dia anterior y se prolonga hasta
+                    // hoy sigue cubriendo un descanso de madrugada.
+                    const invasionMadrugada = tramo.cruzaMedianoche
+                        && tramo.fin - 1440 > tramoDescanso.inicio;
+                    return solapa || invasionMadrugada;
                 });
 
                 const availableCount = employeesDuringBreak.length;
@@ -1190,20 +1810,18 @@ app.post('/api/:type/breaks', async (req, res) => {
 
         // If covered break, validate that the covering employee has no scheduling conflicts
         if (break_type === 'covered' && covered_by_employee_id) {
-            const conflictCheck = await pool.query(
-                `SELECT location_id, start_time, end_time
-                 FROM assignments
-                 WHERE employee_id = $1
-                 AND work_date = $2
-                 AND (
-                     (start_time < $3 AND end_time > $4) OR
-                     (start_time < $3 AND end_time >= $3) OR
-                     (start_time <= $4 AND end_time > $4)
-                 )`,
-                [covered_by_employee_id, work_date, break_end_time, break_start_time]
-            );
+            // Mismo criterio que el resto: minutos continuos, para que un
+            // descanso de madrugada se detecte tambien contra un turno de
+            // noche que viene del dia anterior.
+            const turnoCobertura = minutosTurno(break_start_time, break_end_time);
+            const conflicto = turnoCobertura
+                ? await buscarConflicto(pool, {
+                    employee_id: covered_by_employee_id, work_date,
+                    turno: turnoCobertura, excludeId: null
+                })
+                : null;
 
-            if (conflictCheck.rows.length > 0) {
+            if (conflicto) {
                 return res.status(400).json({
                     error: 'schedule_conflict',
                     message: `The employee covering the break has a scheduling conflict with another assignment.`
@@ -1310,6 +1928,87 @@ function scheduleDailyBackups() {
 
     console.log('Daily backup scheduler started (runs at 00:00 daily)');
 }
+
+// ============================================
+// IMPORTACION INTELIGENTE (Excel / futuro Quinyx)
+// ============================================
+// Rutas nuevas; no se modifica ningun endpoint existente.
+
+const importRoutes = require('./import-routes');
+const IMPORT_CTX = { foods, retail, getPool };
+
+// Modulo de inspecciones (hallazgos, correcciones, catalogos y exportacion).
+// Sustituye al bloque que estaba en linea dentro de este archivo: ahora valida
+// las relaciones antes de escribir y usa borrado logico en vez de destruir el
+// historico. No altera ningun otro endpoint.
+const { montarRutasInspecciones } = require('./inspections-routes');
+montarRutasInspecciones(app, getPool);
+
+// Historial de auditoria y archivos de evidencia. Van aparte porque son
+// transversales: los escribe el sistema al cambiar un estado, pero tambien se
+// consultan sueltos (por ejemplo, el "cambio rapido" de un hallazgo).
+const { montarRutasAuditoria } = require('./inspections-audit-routes');
+montarRutasAuditoria(app, getPool);
+
+// POST /api/:type/import/validate -> preview autoritativo, no escribe nada
+app.post('/api/:type/import/validate', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        const { rows = [], source = 'excel' } = req.body || {};
+        if (!Array.isArray(rows) || rows.length === 0) {
+            return res.status(400).json({ error: 'no_rows', message: 'No rows provided' });
+        }
+        if (rows.length > 5000) {
+            return res.status(400).json({ error: 'too_many_rows', message: 'Max 5000 rows per import' });
+        }
+        const results = await importRoutes.validateRows(IMPORT_CTX, pool, rows, { source, type: req.params.type });
+        const counts = results.reduce((a, r) => {
+            a[r.status] = (a[r.status] || 0) + 1;
+            return a;
+        }, {});
+        res.json({ total: results.length, counts, rows: results });
+    } catch (err) {
+        console.error('Import validate error:', err);
+        res.status(500).json({ error: 'validate_failed', message: err.message });
+    }
+});
+
+// POST /api/:type/import/commit -> escritura transaccional
+app.post('/api/:type/import/commit', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        const summary = await importRoutes.commitImport(IMPORT_CTX, pool, {
+            ...(req.body || {}),
+            target_type: req.params.type
+        });
+        performBackup(req.params.type).catch(e => console.error('Backup failed:', e));
+        res.json(summary);
+    } catch (err) {
+        console.error('Import commit error:', err);
+        res.status(500).json({ error: 'commit_failed', message: err.message });
+    }
+});
+
+// GET /api/:type/import/history -> historial (§13)
+app.get('/api/:type/import/history', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        const limit = Math.min(parseInt(req.query.limit, 10) || 25, 100);
+        const r = await pool.query(
+            `SELECT id, file_name, source, detected_type, target_type, imported_at,
+                    imported_by, total_records, imported_count, updated_count,
+                    duplicate_count, rejected_count, status, details
+               FROM import_history
+              ORDER BY imported_at DESC, id DESC
+              LIMIT $1`,
+            [limit]
+        );
+        res.json({ history: r.rows });
+    } catch (err) {
+        console.error('Import history error:', err);
+        res.status(500).json({ error: 'history_failed', message: err.message });
+    }
+});
 
 // ============================================
 // START SERVER
