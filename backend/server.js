@@ -1950,6 +1950,11 @@ montarRutasInspecciones(app, getPool);
 const { montarRutasAuditoria } = require('./inspections-audit-routes');
 montarRutasAuditoria(app, getPool);
 
+// Exportacion del horario a Excel. Solo lee: arma el archivo con el mismo
+// formato que el importador ya entiende, para que se pueda volver a subir.
+const { montarRutasExportacionHorario } = require('./schedule-export-routes');
+montarRutasExportacionHorario(app, getPool);
+
 // POST /api/:type/import/validate -> preview autoritativo, no escribe nada
 app.post('/api/:type/import/validate', async (req, res) => {
     try {

@@ -4221,7 +4221,9 @@ function renderInspectionsList() {
     `;
 
     renderedInspections.forEach(i => {
-        const inspector = i.inspector_name || (i.inspector_id ? ('ID ' + i.inspector_id) : '');
+        // inspector_display es el nombre guardado en la propia inspeccion. Si no
+        // hubiera (inspecciones antiguas), el backend pone una aviso con el id.
+        const inspector = i.inspector_display || i.inspector_name || '';
         html += `
             <tr>
                 <td><strong>${esc(i.inspection_number || i.id)}</strong>${inspector
@@ -4343,10 +4345,13 @@ async function viewInspection(id) {
     const i = await getInspection(id);
     if (!i) { showNotification(t('insp.inspectionNotFound'), 'error'); return; }
 
+    // El nombre que se muestra es el guardado en la propia inspeccion, mas su
+    // id de inspector. Ese id es propio del registro de inspectores: no es el de
+    // un empleado. Cuando no hay nombre (inspecciones antiguas), el backend ya
+    // devuelve un texto que explica el id, asi que no se le añade otra vez.
     const inspector = i.inspector_name
-        ? i.inspector_name + (i.inspector_id ? '  (ID ' + i.inspector_id + ')' : '')
-        : (i.inspector_id ? 'ID ' + i.inspector_id + ' — no está en la lista de empleados'
-                          : 'sin inspector registrado');
+        ? i.inspector_name + (i.inspector_id ? '  ·  ' + t('insp.inspectorIdShort') + ' ' + i.inspector_id : '')
+        : (i.inspector_display || (i.inspector_id ? 'ID ' + i.inspector_id : t('insp.inspectorNone')));
 
     abrirModalDetalle(t('insp.inspectionDetail'), `
         <div class="detail-card">
@@ -4448,7 +4453,7 @@ function renderInspectionsMap() {
               (f.hallazgos_abiertos ? ` · ${f.hallazgos_abiertos} ` + t('insp.openShort') : '')
             : t('insp.neverInspected');
 
-        const inspector = f.inspector_display || (f.inspector_id ? 'ID ' + f.inspector_id : '');
+        const inspector = f.inspector_display || f.inspector_name || '';
 
         return `
             <div class="location-card ${inspeccionada ? 'location-card-inspected' : ''}" data-location-id="${esc(f.location_id)}"
@@ -4709,6 +4714,84 @@ async function refreshEmployeesPanel() {
     } finally {
         btn.innerHTML = originalText;
         btn.disabled = false;
+    }
+}
+
+// ============================================================================
+//  EXPORTAR EL HORARIO A EXCEL
+// ============================================================================
+//  El archivo se genera en el servidor con el mismo formato que el importador ya
+//  entiende (hojas "Schedule", "Import Data" y "Empleados"), de modo que se
+//  puede volver a subir sin convertir nada. Aqui solo se le pide la fecha y se
+//  deja que el navegador guarde la respuesta.
+//
+//  Antes de descargar se consulta la vista previa. No es un adorno: el servidor
+//  avisa de lo que no puede representar (una supervisión sin localización, un
+//  turno que empieza a medianoche) y quien exportar decide con la información a
+//  la vista, en vez de descubrirlo al reimportar el archivo.
+// ============================================================================
+async function exportScheduleExcel() {
+    const btn = document.getElementById('exportScheduleExcelBtn');
+    const workDate = document.getElementById('workDate');
+    const fecha = workDate ? workDate.value : '';
+
+    // Sin fecha no hay nada que exportar, y mandar la de hoy sin avisar sería
+    // entregar un archivo que no es el que se ha pedido.
+    if (!fecha) {
+        showNotification(t('sched.exportBadDate'), 'error');
+        return;
+    }
+
+    const originalText = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + t('sched.exporting');
+    }
+
+    try {
+        // Vista previa: qué se va a exportar y con qué avisos.
+        const prev = await apiRequest(`/schedule/export-preview?date=${encodeURIComponent(fecha)}`);
+        const dia = (prev.detalle && prev.detalle[0]) || {};
+
+        // Un día sin turnos produce un archivo con las hojas vacías. Se avisa y se
+        // pregunta, porque casi siempre es que la fecha está mal.
+        if (!dia.asignaciones) {
+            if (!confirm(t('sched.exportEmptyConfirm'))) return;
+        }
+
+        // Avisos que no impiden exportar pero conviene conocer.
+        const avisos = [];
+        const sinZona = (dia.locacionesSinZona || 0);
+        if (sinZona > 0) avisos.push(sinZona + ' ' + t('sched.exportNoArea'));
+        const sinUbic = dia.supervisionSinUbicacion || [];
+        if (sinUbic.length) {
+            avisos.push(t('sched.exportSupervisionMissing') + ': '
+                + sinUbic.map(x => `${x.localizacion} (${(x.supervisores || []).join(', ')})`).join('; '));
+        }
+        if ((dia.turnosInrepresentables || []).length) {
+            avisos.push('Turnos que el importador no puede representar: ' + dia.turnosInrepresentables.join('; '));
+        }
+        avisos.forEach(a => showNotification(a, 'info'));
+
+        // La descarga la hace el navegador con un enlace temporal, que es lo que
+        // hace que respete el nombre que pone el servidor.
+        const url = `${API_BASE_URL}/${currentType}/schedule/export.xlsx?date=${encodeURIComponent(fecha)}`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        showNotification(t('sched.exportStarted'), 'success');
+    } catch (error) {
+        console.error('Error exportando horario:', error);
+        showNotification(t('sched.exportErrors') + ': ' + (error.message || error), 'error');
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
     }
 }
 
@@ -5263,7 +5346,13 @@ const I18N = {
         'insp.inspectionDate': "Fecha de inspección",
         'insp.inspectionTime': "Hora de inspección",
         'insp.inspector': "Inspector",
-        'insp.searchInspector': "Buscar inspector…",
+        'insp.inspectorHint': "Escribe el nombre de quien hizo la inspección. No hace falta que esté dado de alta como empleado.",
+        'insp.inspectorRegistered': "Inspector {{nombre}} registrado con su propio identificador.",
+        'insp.inspectorUses': "{{n}} inspección/es",
+        'insp.inspectorNeverUsed': "sin inspecciones todavía",
+        'insp.inspectorIdShort': "ID de inspector",
+        'insp.inspectorNone': "sin inspector registrado",
+        'insp.searchInspector': "Escribe el nombre del inspector…",
         'insp.inspectionType': "Tipo de inspección",
         'insp.searchType': "Buscar tipo…",
         'insp.newType': "Nuevo tipo",
@@ -5280,8 +5369,7 @@ const I18N = {
         'insp.dateRequired': "Indica la fecha de la inspección.",
         'insp.typeRequired': "Elige el tipo de inspección.",
         'insp.locationRequired': "Elige la locación inspeccionada.",
-        'insp.inspectorRequired': "Indica quién hizo la inspección.",
-        'insp.inspectorNotRegistered': "El ID del inspector no corresponde a ningún empleado. Se guardó tal cual.",
+        'insp.inspectorRequired': "Escribe el nombre de quien hizo la inspección.",
         'insp.findingId': "ID del hallazgo",
         'insp.relatedInspection': "Inspección relacionada",
         'insp.searchInspection': "Buscar inspección…",
@@ -5835,6 +5923,19 @@ const I18N = {
         'sched.sectionExtraTasks': 'Tareas Extra',
         'sched.sectionNostalgiaNight': 'Nostalgia Night',
         'sched.overnightHint': 'Turno de noche: si la hora de fin es menor que la de inicio, el turno termina al día siguiente.',
+        // Exportación del horario a Excel. El archivo usa el mismo formato que el
+        // importador, así que se puede volver a subir sin convertir nada.
+        'sched.exportSchedule': 'Exportar Horario',
+        'sched.exportScheduleHint': 'Descarga el horario del día seleccionado en un Excel que se puede volver a importar.',
+        'sched.exporting': 'Generando Excel...',
+        'sched.exportStarted': 'Descarga iniciada. Si no empieza, revisa las descargas del navegador.',
+        'sched.exportEmpty': 'Ese día no tiene turnos asignados: el archivo sale solo con las hojas y los encabezados.',
+        'sched.exportEmptyConfirm': 'Ese día no tiene turnos asignados. ¿Descargar el archivo igualmente?',
+        'sched.exportErrors': 'No se pudo exportar el horario',
+        'sched.exportBadDate': 'Selecciona un día válido antes de exportar.',
+        'sched.exportSupervisionMissing': 'Supervisión sin localización conocida',
+        'sched.exportNoArea': 'No se pudo determinar a qué área OPS pertenece cada localización, porque el campo «Grupo OPS» está vacío. La exportación usa nombres neutros en lugar de inventar un área.',
+        'sched.exportGood': 'Turnos exportados',
         'sched.sectionNotes': 'Notas',
         'sched.sectionTag': 'Sección',
         'sched.notAssigned': 'Sin asignar',
@@ -5894,7 +5995,13 @@ const I18N = {
         'insp.inspectionDate': "Inspection date",
         'insp.inspectionTime': "Inspection time",
         'insp.inspector': "Inspector",
-        'insp.searchInspector': "Search inspector…",
+        'insp.inspectorHint': "Type the name of whoever performed the inspection. They do not need to be registered as an employee.",
+        'insp.inspectorRegistered': "Inspector {{nombre}} registered with their own ID.",
+        'insp.inspectorUses': "{{n}} inspection(s)",
+        'insp.inspectorNeverUsed': "no inspections yet",
+        'insp.inspectorIdShort': "inspector ID",
+        'insp.inspectorNone': "no inspector recorded",
+        'insp.searchInspector': "Type the inspector name…",
         'insp.inspectionType': "Inspection type",
         'insp.searchType': "Search type…",
         'insp.newType': "New type",
@@ -5911,8 +6018,7 @@ const I18N = {
         'insp.dateRequired': "Enter the inspection date.",
         'insp.typeRequired': "Choose the inspection type.",
         'insp.locationRequired': "Choose the inspected location.",
-        'insp.inspectorRequired': "Enter who performed the inspection.",
-        'insp.inspectorNotRegistered': "That inspector ID does not match any employee. It was saved as given.",
+        'insp.inspectorRequired': "Type the name of whoever performed the inspection.",
         'insp.findingId': "Finding ID",
         'insp.relatedInspection': "Related inspection",
         'insp.searchInspection': "Search inspection…",
@@ -6778,6 +6884,17 @@ const I18N = {
         'sched.sectionExtraTasks': 'Extra Tasks',
         'sched.sectionNostalgiaNight': 'Nostalgia Night',
         'sched.overnightHint': 'Night shift: if the end time is earlier than the start time, the shift ends the next day.',
+        'sched.exportSchedule': 'Export Schedule',
+        'sched.exportScheduleHint': 'Downloads the selected day\'s schedule as an Excel file that can be imported again.',
+        'sched.exporting': 'Generating Excel...',
+        'sched.exportStarted': 'Download started. If it did not start, check your browser downloads.',
+        'sched.exportEmpty': 'That day has no assignments: the file will contain only the sheets and the headers.',
+        'sched.exportEmptyConfirm': 'That day has no assignments. Download the file anyway?',
+        'sched.exportErrors': 'Could not export the schedule',
+        'sched.exportBadDate': 'Pick a valid day before exporting.',
+        'sched.exportSupervisionMissing': 'Supervision with no known location',
+        'sched.exportNoArea': 'It was not possible to tell which OPS area each location belongs to, because the "OPS Group" field is empty. The export uses neutral names instead of inventing an area.',
+        'sched.exportGood': 'Shifts exported',
         'sched.sectionNotes': 'Notes',
         'sched.sectionTag': 'Section',
         'sched.notAssigned': 'Not assigned',

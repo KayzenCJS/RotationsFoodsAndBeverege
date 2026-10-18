@@ -200,7 +200,17 @@
             <div class="demo-section">
                 <div class="section-title">
                     <h3><i class="fas fa-utensils"></i> Asignación a Locaciones</h3>
-                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                    <!--
+                        Fila de acciones del panel de asignaciones.
+
+                        `section-actions` deja que la fila ENVUELVA en vez de
+                        aplastar los botones: sin eso, al añadir el botón de
+                        exportar la fila se quedaba sin hueco y los botones se
+                        estrujaban hasta partir su texto en dos o tres líneas.
+                        Con wrap cada botón conserva su tamaño natural y, si no
+                        caben, pasan a la línea de abajo.
+                    -->
+                    <div class="section-actions">
                         <button class="btn btn-success-solid btn-large optimization-btn" onclick="optimizeAssignment()" style="padding:12px 24px; font-size:1rem;">
                             <i class="fas fa-magic"></i> Asignar Automáticamente
                         </button>
@@ -209,6 +219,19 @@
                         </button>
                         <button class="btn btn-secondary" onclick="openSupervisorAssignmentModal()">
                             <i class="fas fa-user-tie"></i> Asignar Supervisores
+                        </button>
+                        <!--
+                            Exportar horario. El archivo sale con el mismo formato
+                            que usa el importador (hojas Schedule, Import Data y
+                            Empleados), asi que se puede volver a subir sin
+                            convertir nada. Exporta el día que esté seleccionado en
+                            el campo de arriba, que es el mismo que usa el resto
+                            del panel.
+                        -->
+                        <button class="btn btn-primary" onclick="exportScheduleExcel()"
+                                id="exportScheduleExcelBtn"
+                                title="Descarga el horario del día seleccionado en un Excel que se puede volver a importar.">
+                            <i class="fas fa-file-excel"></i> Exportar Horario
                         </button>
                         <button class="btn btn-secondary" onclick="refreshAssignmentsPanel()" id="refreshAssignmentsBtn"><i class="fas fa-sync-alt"></i> Actualizar</button>
                     </div>
@@ -534,9 +557,13 @@
                     </div>
                 </div>
                 <div class="form-group">
-                    <label data-i18n="insp.inspector">ID del inspector</label>
+                    <label data-i18n="insp.inspector">Inspector</label>
                     <div id="inspectionInspectorBox"></div>
                     <input type="hidden" id="inspectionInspector" />
+                    <p class="imp-note" style="margin-top:0.3rem;font-size:0.78rem;">
+                        <i class="fas fa-info-circle"></i>
+                        <span data-i18n="insp.inspectorHint">Escribe el nombre de quien hizo la inspección. No hace falta que esté dado de alta como empleado.</span>
+                    </p>
                 </div>
                 <div class="form-row">
                     <div class="form-group">

@@ -431,6 +431,18 @@ tr.row-critical, tr.row-critical td { background: var(--row-highlight-bg); }
     border-color: var(--accent-info);
 }
 .btn-full { width:100%; }
+
+/* Fila de acciones de un titulo de seccion.
+   Los botones se alinean en el centro y la fila ENVUELVE cuando no caben, en
+   lugar de comprimirlos. Sin wrap, al añadir un boton mas los existentes se
+   estrujan hasta partir su texto en varias lineas, que es lo que pasaba con
+   "Borrar Asignaciones del Día" y con "Exportar Horario". */
+.section-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
 .btn-large { padding:14px 28px !important; font-size:1.1rem !important; border-radius:12px !important; }
 .btn-sm { padding:6px 12px; font-size:0.8rem; }
 .btn-danger { background:var(--accent-danger-solid); color:var(--on-accent-danger); }
