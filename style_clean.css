@@ -1,0 +1,78 @@
+/* ==================== RESET & BASE ==================== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+    --primary-color: #2563eb;
+    --primary-dark: #1e40af;
+    --secondary-color: #10b981;
+    --accent-color: #f59e0b;
+    --text-dark: #1f2937;
+    --text-light: #6b7280;
+    --text-lighter: #9ca3af;
+    --bg-light: #f9fafb;
+    --bg-white: #ffffff;
+    --bg-panel-bg: #ffffff;
+    --border-color: #e5e7eb;
+    --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6 -1px rgba(0,0,0,0.1);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+    --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.1);
+    --status-available: #10b981;
+    --status-break: #f59e0b;
+    --status-training: #3b82f6;
+    --status-dayoff: #6b7280;
+    --status-holiday: #ef4444;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    line-height: 1.6;
+    color: var(--text-dark);
+    background: var(--bg-white);
+}
+
+/* ==================== DARK THEME ==================== */
+html[data-theme="dark"] {
+    /* === FONDOS NAVY BLUE === */
+    --bg-page: #0F172A;
+    --bg-light: #131C31;
+    --bg-white: #1A2540;
+    --bg-panel: #1E2A47;
+    --bg-card: #243055;
+    --bg-hover: #2D3A66;
+
+    /* === TEXTOS === */
+    --text-dark: #E6ECF5;
+    --text-light: #A8B4CC;
+    --text-lighter: #7A88A6;
+    --text-disabled: #56617A;
+
+    /* === BORDES === */
+    --border-color: #2A3654;
+    --border-emphasis: #3D4C74;
+    --border-separator: #1E2942;
+
+    /* === ACENTOS === */
+    --primary-color: #4C8FD9;
+    --primary-dark: #2563EB;
+    --secondary-color: #10B981;
+    --accent-color: #F59E0B;
+
+    /* === ESTADOS === */
+    --status-available: #4CAF7D;
+    --status-break: #E0A94C;
+    --status-training: #4C8FD9;
+    --status-dayoff: #7A88A6;
+    --status-holiday: #A855F7;
+
+    /* === SOMBRAS === */
+    --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 6 -1px rgba(0,0,0,0.4);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.5);
+    --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.6);
+}
+
+html[data-theme="dark"] body {
+    background-color: var(--bg-page);
+    color: var(--text-dark);
+}

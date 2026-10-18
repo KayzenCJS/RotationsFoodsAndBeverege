@@ -2,3 +2,16 @@ node_modules/
 .env
 nul
 QuerySQL/
+
+# Respaldos de la base de datos.
+#
+# Contienen datos reales de empleados (nombres, ids, calendarios, inspecciones)
+# y el repositorio es publico: subirlos dejaria esa informacion expuesta.
+# Los .sql se generan con backend/backup_table.js, backend/make_backup.js y
+# backend/backup_inspections.js, y se quedan en el disco para restaurar.
+backend/backups/
+
+# El backup programado por defecto produce archivos de 0 KB, asi que no sirve
+# de nada accumulationalos. Aun asi, por si alguien los genera a mano:
+backend/backups/*.sql
+*.sql.tmp
