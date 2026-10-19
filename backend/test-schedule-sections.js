@@ -101,10 +101,13 @@ const snapshot = async () => {
     ok(bySec[s] > 0, s + ' sigue con sus actividades (' + bySec[s] + ')'));
   ok(cats.length >= 18, cats.length + ' actividades en total');
   ok(locations.some(l => l.id === 'living-shores'), 'Living Shores añadida como location (§5)');
-  // No se codifica el numero de locations: grows con el catalogo (Living
+  // No se codifica el numero de locations: crece con el catalogo (Living
   // Shores, Bistro, Dunkin'...). Lo que importa es que esten las esperadas.
-  ['living-shores', 'bistro', 'dunkin-donuts'].forEach(id =>
+  // Dunkin' Donuts se retiro del sistema y ya no forma parte del catalogo.
+  ['living-shores', 'bistro', 'pixie-kitchen', 'food-fair'].forEach(id =>
     ok(locations.some(l => l.id === id), 'location ' + id + ' presente'));
+  ok(!locations.some(l => l.id === 'dunkin-donuts'),
+    "Dunkin' Donuts ya no esta en el catalogo (se retiro)");
   ok(locations.length >= 12, locations.length + ' locations en el catalogo');
 
   console.log('\n=== 2. Clasificación OPS del empleado (§1) ===');

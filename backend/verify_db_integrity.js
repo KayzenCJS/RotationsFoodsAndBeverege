@@ -3,8 +3,13 @@ const db = require('./db');
 
 // Las cifras de arriba son la foto DESPUES de la migracion del horario y de
 // esta entrega (10 cualidades retiradas + locations/grupos). El catalogo de
-// locations crece a proposito (Living Shores, Bistro, Dunkin'), asi que se
+// locations crece a proposito (Living Shores, Bistro...), asi que se
 // comprueba que las esperadas estan, no que el total sea uno fijo.
+//
+// Dunkin' Donuts se RETIRO (no se borro): sigue en locations con
+// is_active = false para poder leer su turno historico, pero no sale de ningun
+// catalogo ni admite nada nuevo. Por eso ya no se cuenta entre las esperadas y
+// se comprueba aparte. Ver backend/locations-retiradas.js.
 // employees y employee_availability NO van fijos a proposito: crecen cada vez
 // que se da de alta a alguien desde la interfaz. Lo mismo pasa con
 // location_disables (cada vez que se cierra una localizacion) y con
@@ -58,16 +63,46 @@ const EXPECTED = {
   else console.log('  ok   sin letras de grupo en las capacitaciones');
 
   console.log('\n=== catalogo de locations ===');
-  const locs = (await p.query('SELECT id, name, type FROM locations ORDER BY id')).rows;
+  // Se listan las activas. Las RETIRADAS se comprueban aparte, mas abajo: siguen
+  // en la tabla (es historia que se conserva) pero no se ofrecen.
+  const locs = (await p.query(
+    'SELECT id, name, type FROM locations WHERE is_active IS TRUE ORDER BY id')).rows;
   const esperadas = ['pixie-kitchen', 'food-fair', 'slush-factory', 'teddys-oasis',
     'guard-house-snacks', 'poblano-cantina', 'world-pavilion', 'dutch-village-ice-cream',
     'barnyard-pizza', 'dippin-dots', 'farm-stand',
     'living-shores',            // §5 de la extension del horario
-    'bistro', 'dunkin-donuts'];  // Grupo D de esta entrega
+    'bistro'];                  // Grupo D de esta entrega (Dunkin' Donuts se Retiro)
   locs.forEach(r => console.log('  ' + r.id.padEnd(20) + r.name.padEnd(24) + r.type));
   const faltan = esperadas.filter(id => !locs.some(l => l.id === id));
-  if (faltan.length) { console.log('  ATENCION: faltan ' + faltan.join(', ')); bad++; }
-  else console.log('  ok   las ' + esperadas.length + ' esperadas estan (total ' + locs.length + ')');
+  if (faltan.length) { console.log('  FALTO  faltan ' + faltan.join(', ')); bad++; }
+  else console.log('  ok   las ' + esperadas.length + ' esperadas estan (total activo ' + locs.length + ')');
+
+  // Las retiradas: no se ofrecen, pero siguen existiendo para leer el pasado, y
+  // no deben arrastrar en cascada ningun historico.
+  //
+  // Bucle y no forEach: await dentro de un forEach sincrono no se espera nunca,
+  // y aqui hace falta la consulta antes de poder imprimir el recuento.
+  const retiradasLoc = (await p.query(
+    'SELECT id, name FROM locations WHERE is_active IS NOT TRUE ORDER BY id')).rows;
+  for (const r of retiradasLoc) {
+    const turnos = (await p.query(
+      'SELECT count(*)::int n FROM assignments WHERE location_id = $1', [r.id])).rows[0].n;
+    console.log('  ---   ' + r.id.padEnd(20) + r.name.padEnd(24)
+      + 'retirada, ' + turnos + ' turno(s) historico(s) conservado(s)');
+  }
+
+  // Una localizacion retirada que se queda sin norma de grupo es incoherente:
+  // el grupo apuntaria a un edificio que ya no se ofrece.
+  const gruposHuerfanos = (await p.query(
+    `SELECT count(*)::int n FROM location_groups lg
+      WHERE NOT EXISTS (SELECT 1 FROM locations l
+                         WHERE l.id = lg.location_id AND l.is_active IS TRUE)`)).rows[0].n;
+  if (gruposHuerfanos) {
+    console.log('  FALTO ' + gruposHuerfanos + ' grupos apuntan a localizaciones retiradas');
+    bad++;
+  } else {
+    console.log('  ok   ningun grupo apunta a una localizacion retirada');
+  }
 
   console.log('\n=== asignaciones: clasificacion ===');
   const cls = (await p.query(

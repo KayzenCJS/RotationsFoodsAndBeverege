@@ -228,6 +228,11 @@ async function catalogoCertificaciones(pool) {
     return r.rows.map(x => ({ nombre: x.training_name, personas: x.personas }));
 }
 
+// Catalogo de localizaciones: el mismo helper que usa el resto del backend, para
+// que una retirada se esconda igual en todos los sitios y no solo en unos
+// cuantos.
+const retiradas = require('./locations-retiradas');
+
 // ============================================================================
 //  RUTAS
 // ============================================================================
@@ -250,8 +255,13 @@ function montarRutasEntrenados(app, getPool, getPools) {
                 });
             }
 
+            // Solo localizaciones activas. Una retirada no aparece en el catalogo
+            // de busqueda ni en los desplegables, y preguntar por ella responde
+            // "no hay coincidencias" en lugar de devolver a quien trained ahi
+            // en el pasado. El registro se conserva en la tabla.
             const locs = (await pool.query(
-                'SELECT id, name, type, category, serves_alcohol FROM locations ORDER BY name')).rows;
+                `SELECT id, name, type, category, serves_alcohol FROM locations
+                  WHERE ${retiradas.SOLO_ACTIVAS} ORDER BY name`)).rows;
 
             const texto = location || q;
             const encontradas = buscarLocalizaciones(locs, texto);

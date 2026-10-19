@@ -17,6 +17,7 @@
 // ============================================================================
 
 const { planificar, intervalo, papelesDe, FORMACIONES_POR_PAPEL } = require('./auto-assign.js');
+const retiradas = require('./locations-retiradas');
 
 // ---------------------------------------------------------------------------
 //  Dias de la semana
@@ -138,8 +139,13 @@ async function cargarEstado(pool, fecha, opcionales = {}) {
             cerrada: false
         }));
 
+    // Solo localizaciones activas. Una retirada no puede recibir turnos
+    // propuestos, ni entrar en los calculos de cobertura: si saliera aqui, el
+    // repartidor intentaria cubrir un edificio que ya no existe y lo contaria
+    // como cobertura conseguida.
     const locations = (await pool.query(
-        `SELECT id, name, serves_alcohol FROM locations ORDER BY id`)).rows;
+        `SELECT id, name, serves_alcohol FROM locations
+          WHERE ${retiradas.SOLO_ACTIVAS} ORDER BY id`)).rows;
 
     // --- Personas, con todo lo que decide si pueden trabajar ---------------
     // Una sola consulta con losTraining y la disponibilidad agrupados. El

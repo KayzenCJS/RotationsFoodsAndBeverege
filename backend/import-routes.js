@@ -9,6 +9,7 @@
 // ============================================================================
 
 const S = require('./import-service');   // normalizeDate/Time/Hours + hasTimeOverlap
+const retiradas = require('./locations-retiradas');
 
 // ---------------------------------------------------------------------------
 // Reutiliza las MISMAS fuentes de verdad que ya usa la app (§21):
@@ -47,8 +48,14 @@ async function validateRows(ctx, pool, rows, opts) {
   const employees = empIds.length
     ? (await pool.query('SELECT id, name, role FROM employees WHERE id = ANY($1::int[])', [empIds])).rows
     : [];
+  // Solo localizaciones ACTIVAS. Una retirada no se reconoce como localizacion
+  // al importar: sus filas salen como location_not_found y quedan fuera, que es
+  // justo lo que se busca al dejar de existir. Sus turnos antiguos siguen en la
+  // base porque esto no borra nada.
   const locations = locIds.length
-    ? (await pool.query('SELECT id, name FROM locations WHERE id = ANY($1::varchar[])', [locIds])).rows
+    ? (await pool.query(
+        `SELECT id, name FROM locations
+          WHERE id = ANY($1::varchar[]) AND ${retiradas.SOLO_ACTIVAS}`, [locIds])).rows
     : [];
   const empById = new Map(employees.map((e) => [Number(e.id), e]));
   const locById = new Map(locations.map((l) => [String(l.id), l]));

@@ -43,6 +43,10 @@ app.use(express.static(path.join(__dirname, '..'), {
 
 const getPool = (type) => type === 'retail' ? retail : foods;
 
+// Localizaciones retiradas: catalogo, escritura y lectura de historiales.
+// Ver el modulo para el porque de no borrarlas de la tabla.
+const retiradas = require('./locations-retiradas');
+
 const getBuildingTable = (locationId) => {
     const tables = {
         'pixie-kitchen': 'pixie_kitchen_assignments',
@@ -427,14 +431,31 @@ app.delete('/api/:type/employees/:id', async (req, res) => {
 // LOCATIONS
 // ============================================
 
-// Get all locations
+// Catalogo de localizaciones activas.
+//
+// Este es EL sitio por el que pasan todas las referencias del frontend: al
+// arrancar, la aplicacion hace `locations = await fetchLocations()` y con esa
+// lista construye los desplegables, los filtros, los paneles de horario y las
+// consultas. Si aqui no sale una localizacion, no sale en ninguna parte.
+//
+// Lo que se queda fuera son las RETIRADAS (locations.is_active = false).
+// Siguen existiendo en la tabla para poder leer el pasado, pero no se ofrecen
+// para nada nuevo. Ver backend/locations-retiradas.js para el porque.
+//
+// Con ?incluir_retiradas=1 se devuelven tambien, marcadas con is_active=false.
+// Lo usan los historiales, que necesitan poner nombre a un turno de una
+// localizacion que ya no existe.
 app.get('/api/:type/locations', async (req, res) => {
     try {
         const pool = getPool(req.params.type);
+        const incluirRetiradas = ['1', 'true', 'si'].includes(
+            String(req.query.incluir_retiradas || '').toLowerCase()
+        );
         const result = await pool.query(`
             SELECT l.*, array_agg(DISTINCT lrr.role_name) as required_roles
             FROM locations l
             LEFT JOIN location_required_roles lrr ON l.id = lrr.location_id
+            ${incluirRetiradas ? '' : `WHERE ${retiradas.activaDe('l')}`}
             GROUP BY l.id
             ORDER BY l.id
         `);
@@ -445,16 +466,28 @@ app.get('/api/:type/locations', async (req, res) => {
 });
 
 // Get single location
+//
+// Una localizacion retirada responde como si no existiera: si se distinguiera,
+// bastaria con preguntar por el id para saber que hay algo ahi retirado, y el
+// objetivo de retirarla es que no aparezca en ninguna parte.
 app.get('/api/:type/locations/:id', async (req, res) => {
     try {
         const pool = getPool(req.params.type);
+        const incluirRetiradas = ['1', 'true', 'si'].includes(
+            String(req.query.incluir_retiradas || '').toLowerCase()
+        );
         const result = await pool.query(`
             SELECT l.*, array_agg(DISTINCT lrr.role_name) as required_roles
             FROM locations l
             LEFT JOIN location_required_roles lrr ON l.id = lrr.location_id
             WHERE l.id = $1
+            ${incluirRetiradas ? '' : `AND ${retiradas.activaDe('l')}`}
             GROUP BY l.id
         `, [req.params.id]);
+
+        if (!result.rows[0]) {
+            return res.status(404).json({ error: 'not_found', message: 'Localización no encontrada' });
+        }
         res.json(result.rows[0]);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -474,8 +507,12 @@ const ASSIGNMENT_TYPES = ['LOCATION', 'OPS', 'EXTRA_HOURS', 'SUPPORT', 'EXTRA_TA
 // Grupos OPS/Supervisor validos (seccion 1). NULL = el empleado no es OPS.
 const OPS_GROUPS = ['front_ops', 'ff-pav_ops', 'back_ops', 'oasis-dutch_ops'];
 
-// Grupo D (Bistro / Dunkin' Donuts). Solo estos tres roles pueden estar en el:
-// un bartender, cashier o cook. Cualquier otro rol se rechaza al guardar.
+// Grupo D (Bistro). Solo estos tres roles pueden estar en el grupo: bartender,
+// cashier o cook. Cualquier otro rol se rechaza al guardar.
+//
+// El grupo D estaba formado por Bistro y Dunkin' Donuts. Al retirar Dunkin'
+// Donuts, el grupo se queda con Bistro y sigue funcionando igual: la regla de
+// roles no cambia, porque es del grupo, no de la localizacion.
 const GROUP_D_ROLES = ['bartender', 'cashier', 'cook'];
 
 // employees.group_id es char(1) y PostgreSQL guarda '' como un espacio.
@@ -695,6 +732,10 @@ app.get('/api/:type/assignments', async (req, res) => {
             SELECT a.*, e.name as employee_name, e.role as employee_role, e.group_id,
                    e.ops_group as employee_ops_group,
                    l.name as location_name,
+                   -- Si la localizacion esta retirada, el turno sigue aqui (no se
+                   -- borra nada) pero se marca para que el frontend pueda
+                   -- distinguirlo de un turno normal y no ofrecerlo.
+                   (l.is_active IS NOT FALSE) AS location_active,
                    sc.name_es as section_name, sc.name_en as section_name_en,
                    sc.section as section, sc.icon as section_icon
             FROM assignments a
@@ -783,6 +824,12 @@ app.post('/api/:type/assignments', async (req, res) => {
         // Las secciones no geográficas no son locations: se salta la comprobación
         // de cierre por día, que solo aplica a locations reales.
         if (assignment_type === 'LOCATION') {
+            // Primero lo retirado. Va antes que el cierre por día porque una
+            // localizacion retirada no se puede volver a abrir ni reasignar por
+            // mucho que este libre ese dia: el cierre es temporal, la retirada
+            // no tiene vuelta atras.
+            if (!await retiradas.exigirActiva(pool, location_id, res)) return;
+
             const disableCheck = await pool.query(
                 `SELECT * FROM location_disables
                  WHERE location_id = $1
@@ -868,6 +915,11 @@ app.put('/api/:type/assignments/:id', async (req, res) => {
 
         // El cierre por día solo aplica a locations reales.
         if (assignment_type === 'LOCATION') {
+            // Igual que al crear: una localizacion retirada no admite cambios.
+            // Editar un turno antiguo para moverlo de sitio se cuenta como
+            // crear uno nuevo en otro sitio, asi que tambien se rechaza.
+            if (!await retiradas.exigirActiva(pool, location_id, res)) return;
+
             const disableCheck = await pool.query(
                 `SELECT * FROM location_disables
                  WHERE location_id = $1
@@ -924,6 +976,16 @@ app.post('/api/:type/buildings/:locationId/assignments', async (req, res) => {
     try {
         const pool = getPool(req.params.type);
         const table = getBuildingTable(req.params.locationId);
+
+        // Este endpoint es un atajo por building y comparte la misma tabla
+        // `assignments`. Se le aplica la misma retirada que al endpoint general,
+        // que si no se podrian seguir creando asignaciones por aqui en una
+        // localizacion retirada.
+        if (req.params.locationId && (await pool.query(
+                'SELECT 1 FROM locations WHERE id = $1', [req.params.locationId])).rows.length) {
+            if (!await retiradas.exigirActiva(pool, req.params.locationId, res)) return;
+        }
+
         const { employee_id, role, work_date, shift_start, shift_end } = req.body;
         
         const result = await pool.query(
@@ -1038,10 +1100,13 @@ app.delete('/api/:type/schedule-categories/:key', async (req, res) => {
 // guardar (la FK las rechazaria con un error de servidor).
 app.get('/api/:type/location-groups', async (req, res) => {
     try {
+        // El JOIN filtra las localizaciones retiradas: si no, el grupo seguiria
+        // declarando una localizacion que ya no existe y el formulario de
+        // empleados la deduciria como si fuera valida.
         const result = await getPool('foods').query(`
             SELECT lg.location_id, lg.group_id, l.name AS location_name
               FROM location_groups lg
-              LEFT JOIN locations l ON l.id = lg.location_id
+              JOIN locations l ON l.id = lg.location_id AND ${retiradas.activaDe('l')}
              ORDER BY lg.group_id, l.name
         `);
         res.json(result.rows);
@@ -1057,8 +1122,17 @@ app.get('/api/:type/employees/:id/training-locations', async (req, res) => {
     try {
         const pool = getPool('foods');
         const id = Number(req.params.id);
+        // Solo las activas. El registro de entrenamiento de una localizacion
+        // retirada no se muestra en la ficha: si se mostrara, el empleado
+        // seguiria teniendo ahi una casilla que no se puede volver a marcar ni
+        // quitar a mano, y dariia la sensacion de que esa localizacion sigue
+        // disponible.
         const locs = (await pool.query(
-            'SELECT location_id, trained_at::text FROM employee_location_training WHERE employee_id = $1 ORDER BY location_id',
+            `SELECT elt.location_id, elt.trained_at::text
+               FROM employee_location_training elt
+               JOIN locations l ON l.id = elt.location_id AND ${retiradas.activaDe('l')}
+              WHERE elt.employee_id = $1
+              ORDER BY elt.location_id`,
             [id])).rows;
         const groups = (await pool.query(
             'SELECT group_id FROM employee_groups WHERE employee_id = $1 ORDER BY group_id',
@@ -1071,8 +1145,12 @@ app.get('/api/:type/employees/:id/training-locations', async (req, res) => {
             groups,
             locations: locs,
             // Todos los grupos que se deducen de las locations marcadas.
+            // El JOIN con locations tambien filtra las retiradas: si no, un
+            // grupo podria seguir deduciendose de una localizacion que ya no
+            // existe.
             derived_groups: (await pool.query(
                 `SELECT DISTINCT lg.group_id FROM employee_location_training elt
+                   JOIN locations l ON l.id = elt.location_id AND ${retiradas.activaDe('l')}
                    JOIN location_groups lg ON lg.location_id = elt.location_id
                   WHERE elt.employee_id = $1 ORDER BY lg.group_id`, [id])).rows.map((r) => r.group_id)
         });
@@ -1107,8 +1185,12 @@ app.put('/api/:type/employees/:id/training-locations', async (req, res) => {
         // el grupo solo hace falta para deducir grupos, no para saber si la
         // persona estuvo entrenada ahi.
         const pedidas = [...new Set(locations.map((l) => String(l).trim()).filter(Boolean))];
+        // Solo cuentan las localizaciones ACTIVAS. Una retirada se descarta
+        // igual que si no existiera, y se avisa, para que quien guarda vea que
+        // esa casilla no se ha guardado en lugar de creer que si.
         const conocidas = pedidas.length
-            ? (await pool.query('SELECT id FROM locations WHERE id = ANY($1)',
+            ? (await pool.query(
+                `SELECT id FROM locations WHERE id = ANY($1) AND ${retiradas.SOLO_ACTIVAS}`,
                 [pedidas])).rows.map((r) => r.id)
             : [];
         const descartadas = pedidas.filter((l) => !conocidas.includes(l));
@@ -1344,6 +1426,10 @@ app.post('/api/:type/location-disables', async (req, res) => {
         const pool = getPool(req.params.type);
         const { location_id, disable_date, disable_reason, disabled_by, reactivation_date } = req.body;
 
+        // No tiene sentido cerrar una localizacion que ya no existe: el cierre
+        // es temporal, la retirada es definitiva.
+        if (!await retiradas.exigirActiva(pool, location_id, res)) return;
+
         const result = await pool.query(
             `INSERT INTO location_disables (location_id, disable_date, disable_reason, disabled_by, reactivation_date)
              VALUES ($1, $2, $3, $4, $5)
@@ -1421,6 +1507,9 @@ app.post('/api/:type/supervisor-assignments', async (req, res) => {
     const client = getPool(req.params.type);
     try {
         const { supervisor_id, location_id, assigned_date, role } = req.body;
+
+        // Un supervisor no se puede asignar a una localizacion retirada.
+        if (!await retiradas.exigirActiva(client, location_id, res)) return;
 
         // Check if supervisor already has 5 buildings for this date
         const existingCount = await client.query(
@@ -1531,10 +1620,19 @@ app.get('/api/:type/assignment-history', async (req, res) => {
 app.get('/api/:type/staffing-rules', async (req, res) => {
     try {
         const pool = getPool(req.params.type);
+        // JOIN (no LEFT JOIN) con el filtro de activas: una regla de una
+        // localizacion retirada no se lista. Estas reglas son las que alimentan
+        // los calculos de cobertura de la asignacion automatica, asi que si
+        // salieran, el sistema intentaria cubrir un edificio que no existe.
+        //
+        // El filtro va con alias (activaDe('l')) porque staffing_rules TAMBIEN
+        // tiene una columna is_active: sin cualificar, PostgreSQL dice
+        // "column reference is_active is ambiguous" y el endpoint entero deja
+        // de funcionar.
         const result = await pool.query(`
             SELECT sr.*, l.name as location_name
             FROM staffing_rules sr
-            LEFT JOIN locations l ON sr.location_id = l.id
+            JOIN locations l ON sr.location_id = l.id AND ${retiradas.activaDe('l')}
             WHERE sr.is_active = true
             ORDER BY l.name
         `);
@@ -1548,8 +1646,14 @@ app.get('/api/:type/staffing-rules', async (req, res) => {
 app.get('/api/:type/staffing-rules/:locationId', async (req, res) => {
     try {
         const pool = getPool(req.params.type);
+        // Mismo cuidado con el alias: el EXISTS ve la fila de staffing_rules de
+        // fuera, y sin cualificar "is_active" PostgreSQL no sabe a cual de las
+        // dos columnas se refiere.
         const result = await pool.query(
-            'SELECT * FROM staffing_rules WHERE location_id = $1 AND is_active = true',
+            `SELECT * FROM staffing_rules
+              WHERE location_id = $1 AND is_active = true
+                AND EXISTS (SELECT 1 FROM locations l
+                             WHERE l.id = staffing_rules.location_id AND ${retiradas.activaDe('l')})`,
             [req.params.locationId]
         );
         res.json(result.rows[0] || null);
@@ -1563,6 +1667,9 @@ app.post('/api/:type/staffing-rules', async (req, res) => {
     try {
         const pool = getPool(req.params.type);
         const { location_id, min_employees, requirements, is_active } = req.body;
+
+        // No se pueden crear ni modificar reglas para una localizacion retirada.
+        if (!await retiradas.exigirActiva(pool, location_id, res)) return;
 
         const result = await pool.query(
             `INSERT INTO staffing_rules (location_id, min_employees, requirements, is_active)

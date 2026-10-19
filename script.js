@@ -366,6 +366,11 @@ async function switchType(type) {
             id: a.id,
             locationId: a.location_id,
             locationName: a.location_name,
+            // Las localizaciones RETIRADAS no salen del catalogo, asi que un turno
+            // antiguo puede apuntar a una que ya no esta. El turno se conserva y
+            // se sigue viendo, pero marcado como retirado para que nadie lo
+            // confunda con uno vigente ni intente tocarlo.
+            locationRetirada: a.location_active === false,
             employeeId: a.employee_id,
             employeeName: a.employee_name,
             employeeRole: a.employee_role,
@@ -466,6 +471,11 @@ async function loadInitialData() {
             id: a.id,
             locationId: a.location_id,
             locationName: a.location_name,
+            // Las localizaciones RETIRADAS no salen del catalogo, asi que un turno
+            // antiguo puede apuntar a una que ya no esta. El turno se conserva y
+            // se sigue viendo, pero marcado como retirado para que nadie lo
+            // confunda con uno vigente ni intente tocarlo.
+            locationRetirada: a.location_active === false,
             employeeId: a.employee_id,
             employeeName: a.employee_name,
             employeeRole: a.employee_role,

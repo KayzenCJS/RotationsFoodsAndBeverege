@@ -130,8 +130,15 @@ const H = (t) => (t ? String(t).slice(0, 5) : t);
     // incluirlo. Lo que se comprueba es que la recien creada se accounted.
     eq(pixie.inspecciones_total, 2, 'Pixie suma 2 inspecciones (la historica y la nueva)');
     // El panel lista las locaciones REALES: las mismas que ya habia, ni una mas.
-    const locReales = (await p.query('SELECT count(*)::int n FROM locations')).rows[0].n;
-    eq(panel.length, locReales, 'el panel lista las ' + locReales + ' locaciones reales, sin crear ninguna nueva');
+    //
+    // Solo las ACTIVAS: una localizacion RETIRADA sigue en la tabla (su historia
+    // se conserva) pero no aparece en el panel de inspecciones, porque no se
+    // pueden crear inspecciones nuevas ahi. Por eso el recuento lleva el filtro.
+    const locReales = (await p.query(
+      'SELECT count(*)::int n FROM locations WHERE is_active IS TRUE')).rows[0].n;
+    eq(panel.length, locReales, 'el panel lista las ' + locReales + ' locaciones activas, sin crear ninguna nueva');
+    ok(!panel.some(x => x.location_id === 'dunkin-donuts'),
+      'el panel no incluye ninguna localizacion retirada');
     ok(panel.every(x => x.location_id), 'toda fila del panel trae el id de su locacion');
     const nunca = panel.filter(x => !x.inspection_id);
     ok(nunca.length > 0, 'las locaciones nunca inspeccionadas salen, pero sin inspección');

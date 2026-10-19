@@ -42,6 +42,7 @@ const valor = (v) => (v === undefined || v === null || String(v) === '' ? null :
 
 // Generador del PDF del historial de auditoria.
 const { generarPDF } = require('./inspections-pdf');
+const retiradas = require('./locations-retiradas');
 
 async function existeInspeccion(pool, id) {
     if (!Number.isInteger(Number(id))) return false;
@@ -54,9 +55,14 @@ async function existeHallazgo(pool, id) {
         'SELECT 1 FROM inspection_findings WHERE id = $1 AND deleted_at IS NULL', [Number(id)])).rows.length > 0;
 }
 
+// Una localizacion RETIRADA cuenta como si no existiera. Asi no se puede crear
+// una inspeccion, una tarea ni una correccion sobre un edificio que ya no esta
+// en el sistema. La fila sigue en la tabla para poder leer el pasado.
 async function existeLocacion(pool, id) {
     if (textoVacio(id)) return false;
-    return (await pool.query('SELECT 1 FROM locations WHERE id = $1', [String(id)])).rows.length > 0;
+    return (await pool.query(
+        `SELECT 1 FROM locations l WHERE l.id = $1 AND ${retiradas.activaDe('l')}`,
+        [String(id)])).rows.length > 0;
 }
 
 async function existeEmpleado(pool, id) {
@@ -1196,6 +1202,7 @@ function montarRutasInspecciones(app, getPool) {
                          ORDER BY x.inspection_date DESC, x.created_at DESC
                          LIMIT 1) i ON true
                    LEFT JOIN inspectors insp ON insp.id = i.inspector_id
+                  WHERE ${retiradas.activaDe('l')}
                   ORDER BY l.name`);
             res.json(r.rows);
         } catch (err) {

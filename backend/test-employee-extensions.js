@@ -77,10 +77,13 @@ const RETIRADAS = ['sundae-training', 'prep-tater-kegs', 'prep-toppings',
   // ======================================================================
   console.log('\n=== 2. LOCATIONS ENTRENADAS + GRUPOS MULTIPLES ===');
   const lg = (await api('GET', '/location-groups')).data;
-  eq(lg.length, 13, lg.length + ' location->grupo');
+  // Dunkin' Donuts se retiro del sistema, asi que el grupo D se queda con Bistro
+  // sola y el total baja de 13 a 12. El numero se sigue comprobando: si otra
+  // localizacion se añadiera o se retirara, saltaria aqui.
+  eq(lg.length, 12, lg.length + ' location->grupo (Dunkin Donuts ya no esta)');
   const porGrupo = {};
   lg.forEach(x => { porGrupo[x.group_id] = (porGrupo[x.group_id] || 0) + 1; });
-  eq(porGrupo, { A: 4, B: 4, C: 3, D: 2 }, 'reparto de locations por grupo');
+  eq(porGrupo, { A: 4, B: 4, C: 3, D: 1 }, 'reparto de locations por grupo');
 
   // Se usa un empleado real y se le marcan locations de dos grupos distintos
   const emps = (await api('GET', '/employees')).data;
@@ -132,10 +135,14 @@ const RETIRADAS = ['sundae-training', 'prep-tater-kegs', 'prep-toppings',
   ok(leido.primary_group !== undefined, 'el grupo principal sigue existiendo aparte: ' + JSON.stringify(leido.primary_group));
 
   // "ha estado en todas las locations" -> todas marcadas
-  const todas = (await p.query('SELECT id FROM locations ORDER BY id')).rows.map(r => r.id);
+  //
+  // Solo las ACTIVAS: una localizacion retirada se descarta al guardar (y el
+  // endpoint lo avisa), asi que marcarla y esperar 14 seria pedirle al sistema
+  // que guarde algo que a proposito no guarda.
+  const todas = (await p.query('SELECT id FROM locations WHERE is_active IS TRUE ORDER BY id')).rows.map(r => r.id);
   await api('PUT', `/employees/${emp.id}/training-locations`, { locations: todas, groups: ['A', 'B', 'C', 'D'] });
   const todas2 = (await api('GET', `/employees/${emp.id}/training-locations`)).data;
-  eq(todas2.locations.length, todas.length, todas.length + ' locations marcadas (= todas)');
+  eq(todas2.locations.length, todas.length, todas.length + ' locations marcadas (= todas las activas)');
   eq(todas2.derived_groups.sort(), ['A', 'B', 'C', 'D'], 'grupos deducidos: los 4');
 
   // Una location sin grupo asignado (aun por decidir) se puede marcar, pero no
@@ -165,11 +172,20 @@ const RETIRADAS = ['sundae-training', 'prep-tater-kegs', 'prep-toppings',
   console.log('\n=== 3. GRUPO D (BISTRO) ===');
   const locs = (await api('GET', '/locations')).data;
   ok(locs.some(l => l.id === 'bistro'), 'location Bistro creada');
-  ok(locs.some(l => l.id === 'dunkin-donuts'), "location Dunkin' Donuts creada");
   const bistro = locs.find(l => l.id === 'bistro');
   eq(bistro.type, 'food-beverage', 'Bistro es una location normal (puede recibir empleados y horarios)');
   ok(locs.some(l => l.id === 'bistro' && lg.some(x => x.location_id === 'bistro' && x.group_id === 'D')), 'Bistro pertenece al Grupo D');
-  ok(locs.some(l => l.id === 'dunkin-donuts' && lg.some(x => x.location_id === 'dunkin-donuts' && x.group_id === 'D')), "Dunkin' pertenece al Grupo D");
+
+  // Dunkin' Donuts se retiro del sistema. El grupo D se queda con Bistro y sigue
+  // funcionando: lo que se comprueba aqui es que el retiro no se llevo por
+  // delante el grupo entero. Ver test-retirada-locacion.js para el detalle.
+  ok(!locs.some(l => l.id === 'dunkin-donuts'),
+    "Dunkin' Donuts ya no esta en el catalogo (se retiro)");
+  ok(!lg.some(x => x.location_id === 'dunkin-donuts' && x.group_id === 'D'),
+    "  y el Grupo D ya no lo declara");
+  const deD = lg.filter(x => x.group_id === 'D');
+  ok(deD.length > 0 && deD.every(x => x.location_id === 'bistro'),
+    '  el Grupo D se queda solo con Bistro (' + deD.length + ' localizacion(es))');
 
   // Roles permitidos / prohibidos en el Grupo D
   const base = { name: emp.name, nationality: emp.nationality, age: emp.age, group_id: 'D' };
@@ -248,7 +264,7 @@ const RETIRADAS = ['sundae-training', 'prep-tater-kegs', 'prep-toppings',
   };
   // El empleado vive en foods aunque se mire desde retail.
   const lgRetail = (await rGet('/location-groups')).data;
-  eq(lgRetail.length, 13, 'retail tambien sirve el catalogo de locations (13)');
+  eq(lgRetail.length, 12, 'retail tambien sirve el catalogo de locations (12)');
   const gl = (await rGet(`/employees/${emp.id}/training-locations`)).data;
   ok(gl && gl.employee_id === emp.id, 'retail lee las locations del empleado de foods');
   const guardadoRetail = (await rPut(`/employees/${emp.id}/training-locations`,

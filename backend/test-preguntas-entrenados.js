@@ -42,6 +42,11 @@ const eq = (a, e, m) => {
 const ok = (v, m) => eq(!!v, true, m);
 
 // Las localizaciones reales, con los nombres tal como estan en la base.
+//
+// Dunkin' Donuts NO se incluye: se retiro del sistema y ya no esta en el
+// catalogo. Si lo metieras aqui, la prueba del interprete de preguntas pasaria
+// con una localizacion que en realidad no existe. Que no lo encuentre se
+// comprueba mas abajo.
 const LOCS = [
     { id: 'pixie-kitchen', name: 'Pixie Kitchen' },
     { id: 'guard-house-snacks', name: 'Guard House Snacks' },
@@ -55,8 +60,7 @@ const LOCS = [
     { id: 'poblano-cantina', name: 'Poblano Cantina' },
     { id: 'bistro', name: 'Bistro' },
     { id: 'living-shores', name: 'Living Shores' },
-    { id: 'teddys-oasis', name: "Teddy's at Oasis" },
-    { id: 'dunkin-donuts', name: "Dunkin' Donuts" }
+    { id: 'teddys-oasis', name: "Teddy's at Oasis" }
 ];
 
 console.log('\n=== EL INTÉRPRETE DE PREGUNTAS ===\n');
@@ -81,7 +85,6 @@ const VARIANTES = [
     ['entrenados en pixie', 'pixie-kitchen'],
     ['PIXIE', 'pixie-kitchen'],
     ['quien esta entrenado en Guard House Snacks', 'guard-house-snacks'],
-    ['personas de dunkin donuts', 'dunkin-donuts'],
     ['gente de Dippin Dots', 'dippin-dots'],
     ['entrenadas en The Farm Stand', 'farm-stand'],
     ['farmstand', 'farm-stand'],
@@ -124,6 +127,15 @@ eq(guard && guard.localizacion.id, 'guard-house-snacks', '"guard" encuentra Guar
 
 // Y una palabra que no pertenece a nadie no inventa nada.
 eq(localizacionDeLaPregunta('zzzz', LOCS), null, 'una palabra desconocida no devuelve nada');
+
+// Una localizacion RETIRADA no se resuelve, porque no esta en el catalogo. Preguntar
+// por ella tiene que salir con "no encuentro esa localizacion", no devolviendo a
+// quien trained ahi en el pasado.
+console.log('\n  --- Localizaciones retiradas ---');
+eq(localizacionDeLaPregunta('quien esta entrenado en Dunkin Donuts', LOCS), null,
+    'preguntar por una localizacion retirada no encuentra ninguna');
+eq(localizacionDeLaPregunta('dunkin donuts', LOCS), null,
+    '  tampoco escribiendo solo el nombre');
 
 console.log('\n' + '='.repeat(68));
 console.log('  ' + pass + ' pasaron, ' + fail + ' fallaron');

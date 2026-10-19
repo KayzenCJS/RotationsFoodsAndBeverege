@@ -65,7 +65,16 @@ const firma = (emp, lugar, ini, fin) =>
 
     // Catalogo de la base, que es contra el que el importador empareja.
     const empleados = (await p.query('SELECT id, name FROM employees ORDER BY id')).rows;
-    const locations = (await p.query('SELECT id, name FROM locations ORDER BY id')).rows;
+    // Catalogo contra el que el importador resuelve los nombres del archivo.
+//
+// Se=cargan TODAS las localizaciones, incluidas las RETIRADAS. Es lo que hace
+// el emparejador por nombre, que es puro: si el archivo dijera el nombre de una
+// retirada, encontraria la fila y sabria a que turno corresponde. Lo que decide
+// si un turno puede GUARDARSE es otra cosa, y ahi si se exige que este activa.
+//
+// La mayoria de los dias no tendra ninguna retirada, asi que esto solo se nota
+// cuando se exporta un dia en el que todavia habia personal en una.
+const locations = (await p.query('SELECT id, name FROM locations ORDER BY id')).rows;
 
     // Se prueban varios dias, no solo uno: cada fecha tiene una combinacion
     // distinta de locaciones y de gente, y un fallo suele aparecer solo con una.
@@ -135,15 +144,34 @@ const firma = (emp, lugar, ini, fin) =>
             //    Se comparan los turnos que el importador reconstruye con los que
             //    hay guardados, usando el nombre real de la base para no depender
             //    de como se escribio el texto en el archivo.
+            //
+            //    EXCEPCION CONOCIDA Y DESEADA: los turnos de una localizacion
+            //    RETIRADA no vuelven, y no deben. Al exportar no se dibuja la
+            //    seccion de un edificio que ya no esta en el sistema, asi que no
+            //    hay nada que reimportar. El turno sigue en la base: no se ha
+            //    perdido el dato, simplemente el Excel ya no lo ofrece.
+            //
+            //    Se separa en dos listas en vez de relajar la comprobacion, para
+            //    que el resto de turnos se compare con rigor y para que conste
+            //    cuales son los que no vuelven y por que.
             const deLaBase = (await p.query(
-                `SELECT e.name AS emp, l.name AS lugar,
+                `SELECT e.name AS emp, l.name AS lugar, l.is_active,
                         a.start_time::text AS ini, a.end_time::text AS fin
                    FROM assignments a
                    JOIN employees e ON e.id = a.employee_id
                    JOIN locations  l ON l.id = a.location_id
                   WHERE a.work_date = $1
                   ORDER BY e.name, a.start_time`, [dia])).rows;
-            const esperadasDia = deLaBase.map(r => firma(r.emp, r.lugar, r.ini, r.fin));
+
+            const retiradasDia = deLaBase.filter(r => r.is_active === false);
+            if (retiradasDia.length) {
+                console.log('     (' + retiradasDia.length + ' turno(s) en localizaciones retiradas:'
+                    + ' no se exportan por diseno -> '
+                    + [...new Set(retiradasDia.map(r => r.lugar))].join(', ') + ')');
+            }
+
+            const esperadasDia = deLaBase.filter(r => r.is_active !== false)
+                .map(r => firma(r.emp, r.lugar, r.ini, r.fin));
 
             const obtenidasDia = turnos
                 .filter(x => x.emp && x.loc)
@@ -156,6 +184,14 @@ const firma = (emp, lugar, ini, fin) =>
                 + (faltan.length ? ' -> ' + JSON.stringify(faltan.slice(0, 5)) : ''));
             eq(sobran, [], dia + ': no aparece ningun turno de mas al reimportar'
                 + (sobran.length ? ' -> ' + JSON.stringify(sobran.slice(0, 5)) : ''));
+
+            // Y se comprueba que los unicos que faltan son los de la retirada:
+            // si mañana se pierde otro turno por otra causa, salta aqui.
+            const perdidasRetirada = retiradasDia.filter(r =>
+                !obtenidasDia.includes(firma(r.emp, r.lugar, r.ini, r.fin)));
+            eq(perdidasRetirada.length, retiradasDia.length,
+                dia + ': los unicos turnos que no vuelven son los de la retirada'
+                + (retiradasDia.length ? ' (' + retiradasDia.length + ')' : ''));
 
             console.log('     turnos en la base: ' + esperadasDia.length
                 + '   recuperados por el importador: ' + obtenidasDia.length);

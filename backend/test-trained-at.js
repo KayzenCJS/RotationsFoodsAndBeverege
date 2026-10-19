@@ -54,7 +54,15 @@ const consultar = async (params) => {
     // -----------------------------------------------------------------------
     console.log('=== 1. LA BUSQUEDA ENTIENDE COMO ESCRIBE LA GENTE ===');
 
-    const locs = (await p.query('SELECT id, name FROM locations ORDER BY name')).rows;
+    // Solo las ACTIVAS, igual que hace el endpoint. Si se cogieran tambien las
+    // retiradas, la funcion las encontraria y la prueba daria un falso "bien"
+    // sobre algo que en realidad no se ofrece.
+    const locs = (await p.query(
+        'SELECT id, name FROM locations WHERE is_active IS TRUE ORDER BY name')).rows;
+    const todasLocs = (await p.query('SELECT id, name FROM locations ORDER BY name')).rows;
+    const retiradasLocs = todasLocs.filter(l => !locs.some(x => x.id === l.id));
+    console.log('  (' + locs.length + ' localizaciones activas, '
+        + retiradasLocs.length + ' retiradas que el catalogo no devuelve)');
 
     // Los nombres tal cual los pondria alguien, contra el nombre real.
     const CASOS = [
@@ -66,8 +74,7 @@ const consultar = async (params) => {
         ['World Pavilion', 'world-pavilion'],
         ['Dutch Village', 'dutch-village-ice-cream'],
         ['Living Shores', 'living-shores'],
-        ['Bistro', 'bistro'],
-        ['Dunkin Donuts', 'dunkin-donuts']
+        ['Bistro', 'bistro']
     ];
 
     for (const [comoSeEscribe, idEsperado] of CASOS) {
@@ -86,18 +93,72 @@ const consultar = async (params) => {
     }
 
     // Mayusculas, tildes y comillas sueltas no pueden romperlo.
-    eq(normalizar("Dunkin' Donuts"), normalizar('Dunkin Donuts'), "el apostrofo no cuenta");
+    // El apostrofo se comprueba con una localizacion ACTIVA que lo tenga en el
+    // nombre. Dunkin' Donuts tambien lo tenia, pero se retiro del sistema y ya no
+    // sirve para este caso: en la base ya no esta.
+    const conApostrofo = locs.find(l => /'/i.test(l.name));
+    ok(conApostrofo, 'hay alguna localizacion activa con apostrofo en el nombre: ' + (conApostrofo ? conApostrofo.name : 'ninguna'));
+    if (conApostrofo) {
+        const sinApostrofo = conApostrofo.name.replace(/'/g, '');
+        eq(normalizar(conApostrofo.name), normalizar(sinApostrofo),
+            'el apostrofo no cuenta: "' + conApostrofo.name + '" = "' + sinApostrofo + '"');
+        ok(buscarLocalizaciones(locs, sinApostrofo).some(l => l.id === conApostrofo.id),
+            '  y se encuentra escribiendo el nombre sin apostrofo');
+    }
     eq(normalizar('PÍXIE KITCHEN'), normalizar('pixie kitchen'), 'los acentos y las mayusculas no cuentan');
     ok(buscarLocalizaciones(locs, 'PIXIE KITCHEN').length > 0, 'escribir en mayusculas encuentra igual');
-    ok(buscarLocalizaciones(locs, 'DUNKIN DONUTS').length > 0, 'y con apostrofe o sin apostrofe da igual');
+    ok(buscarLocalizaciones(locs, 'WORLD PAVILION').length > 0, 'y con dos palabras tambien');
+
+    // Una localizacion RETIRADA no aparece en el catalogo, asi que no se
+    // encuentra. Se comprueba con la que haya, sin escribirla en el codigo: si
+    // mañana se retira otra, la prueba sigue valiendo.
+    console.log('\n    una localizacion retirada no se encuentra:');
+    ok(retiradasLocs.length > 0,
+        'hay ' + retiradasLocs.length + ' localizacion(es) retirada(s) para probar');
+
+    for (const ret of retiradasLocs) {
+        const nombreLimpio = ret.name.replace(/[''']/g, '').trim();
+        ok(!buscarLocalizaciones(locs, nombreLimpio).length,
+            '"' + ret.name + '" ya no esta en el catalogo de localizaciones');
+        ok(!buscarLocalizaciones(locs, ret.id).length,
+            '  ni por su identificador (' + ret.id + ')');
+
+        const r = await consultar({ location: ret.id });
+        eq(r.datos.modo, 'sin-coincidencia',
+            '  y preguntando por ella el endpoint dice que no hay coincidencias');
+        eq(r.datos.total, undefined, '  sin devolver ninguna persona');
+
+        // Aunque en la tabla quede su registro de entrenamiento, la consulta no
+        // lo devuelve: es historico que se conserva, no informacion vigente.
+        const enTabla = (await p.query(
+            'SELECT count(*)::int n FROM employee_location_training WHERE location_id = $1',
+            [ret.id])).rows[0].n;
+        console.log('         (' + ret.name + ': ' + enTabla
+            + ' registro(s) de entrenamiento conservado(s) en la tabla, no devueltos)');
+    }
 
     // -----------------------------------------------------------------------
     console.log('\n=== 2. DEVUELVE SOLO QUIEN ESTA REGISTRADO ===');
 
-    // Lo que dice la tabla, contrasted persona a persona.
+    // Lo que dice la tabla, contrastado persona a persona.
+    //
+    // Solo se miran las localizaciones ACTIVAS: las retiradas siguen teniendo su
+    // fila en la tabla (es historico que se conserva), pero la consulta no las
+    // devuelve, asi que compararlas contra la tabla daria un falso fallo.
     const registrados = (await p.query(
-        'SELECT location_id, array_agg(employee_id ORDER BY employee_id) AS ids FROM employee_location_training GROUP BY location_id'
+        `SELECT elt.location_id, array_agg(elt.employee_id ORDER BY elt.employee_id) AS ids
+           FROM employee_location_training elt
+           JOIN locations l ON l.id = elt.location_id AND l.is_active IS TRUE
+          GROUP BY elt.location_id`
     )).rows.map(r => ({ location: r.location_id, ids: r.ids }));
+
+    const retiradas = (await p.query(
+        `SELECT elt.location_id, count(*)::int n
+           FROM employee_location_training elt
+           JOIN locations l ON l.id = elt.location_id AND l.is_active IS NOT TRUE
+          GROUP BY elt.location_id`)).rows;
+    retiradas.forEach(r => console.log('    (retirada, con ' + r.n
+        + ' registro(s) conservado(s) que la consulta no devuelve: ' + r.location_id + ')'));
 
     ok(registrados.length > 0, 'hay ' + registrados.length + ' localizaciones con gente registrada');
 
@@ -115,9 +176,12 @@ const consultar = async (params) => {
     // estuvo de turno una vez.
 
     // Una localizacion con turnos de gente pero SIN entrenamiento registrado.
+    // Se excluyen las retiradas: si no, el top 1 seria siempre la retirada, que
+    // ya no esta en el catalogo y daria un falso negativo.
     const conTurnos = (await p.query(
         `SELECT a.location_id, count(DISTINCT a.employee_id)::int n
            FROM assignments a
+           JOIN locations l ON l.id = a.location_id AND l.is_active IS TRUE
           WHERE a.location_id IS NOT NULL
             AND a.location_id NOT IN (SELECT location_id FROM employee_location_training)
           GROUP BY a.location_id ORDER BY n DESC LIMIT 1`)).rows[0];
@@ -235,7 +299,8 @@ const consultar = async (params) => {
 
     const sinGente = (await p.query(
         `SELECT l.id, l.name FROM locations l
-          WHERE NOT EXISTS (SELECT 1 FROM employee_location_training e WHERE e.location_id = l.id)
+          WHERE l.is_active IS TRUE
+            AND NOT EXISTS (SELECT 1 FROM employee_location_training e WHERE e.location_id = l.id)
           ORDER BY l.name LIMIT 1`)).rows[0];
 
     ok(sinGente, 'hay una localizacion sin nadie registrado: ' + (sinGente ? sinGente.name : 'ninguna'));

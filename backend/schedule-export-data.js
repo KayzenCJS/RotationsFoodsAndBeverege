@@ -35,11 +35,19 @@ async function obtenerDatos(pool, fecha) {
                 a.role,
                 a.assignment_type,
                 a.category,
-                a.source
+                a.source,
+                -- Para distinguir una localizacion RETIRADA (que tiene fila y
+                -- nombre, pero no se ofrece) de una que no existe. Con el
+                -- LEFT JOIN, una inexistente daria NULL y una retirada daria
+                -- false: IS NOT FALSE los separa sin ambiguedad.
+                (l.is_active IS NOT FALSE) AS location_active
            FROM assignments a
            LEFT JOIN locations l ON l.id = a.location_id
            LEFT JOIN employees e ON e.id = a.employee_id
           WHERE a.work_date = $1
+            -- NO se filtra por is_active aqui. La fila tiene que llegar al
+            -- agrupador para que pueda decidir si se dibuja o si se informa, y
+            -- el informe necesita el recuento.
           ORDER BY COALESCE(l.name, a.category, ''), a.start_time, e.name`, [fecha])).rows;
 
     // Supervisores del dia. Es la unica fuente real de "quien cubre que".
@@ -50,11 +58,18 @@ async function obtenerDatos(pool, fecha) {
                 e.role AS employee_role,
                 s.location_id,
                 l.name AS location_name,
+                -- Igual que en las asignaciones: distingue una localizacion
+                -- RETIRADA de una que no existe (que daria NULL).
+                (l.is_active IS NOT FALSE) AS location_active,
                 s.role
            FROM supervisor_assignments s
            JOIN employees e ON e.id = s.supervisor_id
            LEFT JOIN locations l ON l.id = s.location_id
           WHERE s.assigned_date = $1
+            -- Tampoco se filtra aqui, por el mismo motivo que en las
+            -- asignaciones: una supervision hacia una localizacion retirada se
+            -- recoge en el informe de supervision sin ubicacion, en vez de
+            -- perderse en silencio dentro del Excel.
           ORDER BY l.name, e.name`, [fecha])).rows;
 
     const categorias = (await pool.query(
@@ -131,6 +146,26 @@ const nombreCategoria = (clave, soloCatalogo) => {
         const geografica = !!a.location_id;
         const clave = geografica ? 'loc:' + a.location_id : 'cat:' + (a.category || '');
 
+        // Una localizacion RETIRADA (locations.is_active = false) tiene fila y
+        // nombre, asi que sin este paso se dibujaria su seccion en el Excel y el
+        // archivo ofreceria un edificio que ya no esta en el sistema.
+        //
+        // No sale en la hoja, pero tampoco se pierde en silencio: se recoge en
+        // el informe, igual que las asignaciones sin nombre real. Quien genera el
+        // archivo ve que habia turnos ahi y que no se han incluido.
+        if (geografica && a.location_active === false) {
+            asignacionesSinNombre.push({
+                id: a.id,
+                employee_name: a.employee_name,
+                location_id: a.location_id,
+                location_name: a.location_name,
+                categoria: 'localizacion_retirada',
+                start_time: a.start_time,
+                end_time: a.end_time
+            });
+            continue;
+        }
+
         // Una asignacion puede apuntar a una localizacion que ya no esta en la
         // tabla `locations`. `location_name` sale vacio y el unico texto que
         // queda es el identificador o la clave de categoria. Ese texto se
@@ -184,7 +219,22 @@ const nombreCategoria = (clave, soloCatalogo) => {
     // se muestra solo el nombre, porque no hay horas inventables.
     const supervisoresPorLoc = new Map();
     const supervisorSinLoc = new Map();
+    const supervisoresRetirados = [];
     for (const s of supervisores) {
+        // Igual que con los turnos: una supervision hacia una localizacion
+        // RETIRADA no genera seccion en el Excel. Si no, el archivo ofreceria un
+        // edificio que ya no existe. La fila se queda en la consulta y mas abajo
+        // se informa, para que no desaparezca en silencio.
+        if (s.location_id && s.location_active === false) {
+            supervisoresRetirados.push({
+                supervisor_id: s.supervisor_id,
+                supervisor_name: s.supervisor_name,
+                location_id: s.location_id,
+                location_name: s.location_name
+            });
+            continue;
+        }
+
         const destino = s.location_id ? supervisoresPorLoc : supervisorSinLoc;
         if (!destino.has(s.location_id || '')) destino.set(s.location_id || '', []);
         const lista = destino.get(s.location_id || '');
@@ -245,6 +295,19 @@ const nombreCategoria = (clave, soloCatalogo) => {
             geografica: true,
             zona: zonaDeLocacion.get(locId) || '',
             turnos: []
+        });
+    }
+
+    // Las supervisiones hacia localizaciones RETIRADAS se suman al informe de
+    // supervision sin seccion, para que se vean juntas las dos causas por las que
+    // una supervision no ha podido colocarse: que la localizacion ya no exista, o
+    // que exista pero se haya retirado.
+    for (const s of supervisoresRetirados) {
+        supervisionSinSeccion.push({
+            localizacion: s.location_name || s.location_id,
+            existeEnLocaciones: true,
+            retirada: true,
+            supervisores: [s.supervisor_name]
         });
     }
 
