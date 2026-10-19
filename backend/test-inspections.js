@@ -57,6 +57,21 @@ const H = (t) => (t ? String(t).slice(0, 5) : t);
 
     console.log('estado inicial: ' + JSON.stringify(base));
 
+    // Foto campo a campo del hallazgo historico #2.
+    //
+    // Se compara contra esta foto, no contra un valor escrito a mano. Antes se
+    // comparaba contra un id de empleado fijo, y en cuanto ese empleado deja de
+    // existir la comprobacion falla sin que haya pasado nada: ese "1" era de
+    // cuando la tabla de empleados empezaba en 1, y ahora empieza en 2. Lo que
+    // de verdad importa es que el registro siga igual que antes de empezar.
+    //
+    // La foto se usa tambien para restaurarlo al terminar: una prueba no puede
+    // dejar la base distinta de como la encontro.
+    const hallazgoHistorico = (await p.query(
+        'SELECT id, title, category, status, assigned_to, due_date FROM inspection_findings WHERE id = 2'
+    )).rows[0];
+    const HALLAZGO_ANTES = hallazgoHistorico || null;
+
     // Un supervisor real para las pruebas.
     const emps = (await nodo('/employees')).data;
     const supervisor = emps.find(e => e.role === 'supervisor');
@@ -343,9 +358,13 @@ const H = (t) => (t ? String(t).slice(0, 5) : t);
     eq(insp2.location_id, 'pixie-kitchen', 'y su locación se derivó del hallazgo que tenía');
     const hallAntiguo = (await nodo('/findings')).data.find(f => f.id === 2);
     ok(hallAntiguo, 'el hallazgo histórico sigue en el listado');
-    eq(hallAntiguo.title, 'Oil quality test', 'con su título original');
-    eq(hallAntiguo.category, 'Food Safety', 'con su categoría original');
-    ok(hallAntiguo.assigned_to === 1, 'con su assigned_to original (1), que no se tocó');
+    if (HALLAZGO_ANTES && hallAntiguo) {
+        eq(hallAntiguo.title, HALLAZGO_ANTES.title, 'con su título original');
+        eq(hallAntiguo.category, HALLAZGO_ANTES.category, 'con su categoría original');
+        eq(hallAntiguo.status, HALLAZGO_ANTES.status, 'con su estado original');
+        eq(hallAntiguo.assigned_to, HALLAZGO_ANTES.assigned_to,
+            'y su assigned_to sigue en ' + HALLAZGO_ANTES.assigned_to + ', sin tocar');
+    }
     const histAntigua = (await p.query('SELECT count(*)::int n FROM inspection_status_history')).rows[0].n;
     ok(histAntigua >= 1, 'el historial antiguo sigue (' + histAntigua + ' entradas)');
     const catAntigua = (await p.query(
@@ -366,6 +385,30 @@ const H = (t) => (t ? String(t).slice(0, 5) : t);
     await p.query('DELETE FROM inspection_status_history WHERE inspection_id = ANY($1::int[])', [creado.inspecciones]);
     await p.query('DELETE FROM inspection_status_history WHERE finding_id = ANY($1::int[]) AND finding_id NOT IN (SELECT id FROM inspection_findings)', [creado.hallazgos]);
     await p.query("DELETE FROM finding_categories WHERE lower(btrim(name)) IN ('higiene de manos')");
+
+    // El hallazgo historico #2 se devuelve tal y como estaba. Algunas pruebas
+    // lo tocan (cambian su responsable o su estado) para comprobar que la API
+    // responde, y sin restaurarlo aqui la base se queda cambiada para siempre.
+    // Solo se restauran los campos que se hayan podido alterar.
+    if (HALLAZGO_ANTES) {
+        const cambiado = await p.query(
+            `SELECT count(*)::int n FROM inspection_findings
+              WHERE id = 2 AND (
+                    title IS DISTINCT FROM $1 OR category IS DISTINCT FROM $2
+                 OR status IS DISTINCT FROM $3 OR assigned_to IS DISTINCT FROM $4
+                 OR due_date IS DISTINCT FROM $5)`,
+            [HALLAZGO_ANTES.title, HALLAZGO_ANTES.category, HALLAZGO_ANTES.status,
+                HALLAZGO_ANTES.assigned_to, HALLAZGO_ANTES.due_date]);
+        if (cambiado.rows[0].n > 0) {
+            await p.query(
+                `UPDATE inspection_findings
+                    SET title = $1, category = $2, status = $3, assigned_to = $4, due_date = $5
+                  WHERE id = 2`,
+                [HALLAZGO_ANTES.title, HALLAZGO_ANTES.category, HALLAZGO_ANTES.status,
+                    HALLAZGO_ANTES.assigned_to, HALLAZGO_ANTES.due_date]);
+            console.log('hallazgo historico #2 restaurado a su estado original');
+        }
+    }
 
     // Los inspectores que creo esta corrida. Los que ya habia no se tocan: son
     // parte del estado real y el test no es dueño de ellos.
