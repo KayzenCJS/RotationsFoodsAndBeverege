@@ -89,13 +89,13 @@ console.log('    Alguien tiene Student Dining por la tarde y el algoritmo');
 console.log('    intenta ponerla en un local que se solapa.\n');
 
 {
-    const danna = persona(1, ['server'], { formaciones: ['pos-training', 'customer-service'] });
+    const conTurnoTarde = persona(1, ['server'], { formaciones: ['pos-training', 'customer-service'] });
     // El turno por el que se le quiere sacar: 18:00-22:00, que pisa entero el
     // compromiso de la tarde.
     const reglas = [regla('barnyard', 1, [{ role: 'server', count: 1 }])];
 
-    const r = escenario(reglas, [danna], {
-        compromisos: [turno(danna, 'Student Dining', '17:00', '21:00', { category: 'student-dining' })],
+    const r = escenario(reglas, [conTurnoTarde], {
+        compromisos: [turno(conTurnoTarde, 'Student Dining', '17:00', '21:00', { category: 'student-dining' })],
         // El turno propuesto es el que hace conflicto.
         ventanas: { barnyard: ventana('18:00', '22:00') }
     });
@@ -111,10 +111,10 @@ console.log('    intenta ponerla en un local que se solapa.\n');
 
 // El mismo turno, pero sin solapar: a las 09:00-13:00 se puede entrar.
 {
-    const danna = persona(1, ['server']);
+    const conTurnoTarde = persona(1, ['server']);
     const reglas = [regla('barnyard', 1, [{ role: 'server', count: 1 }])];
-    const r = escenario(reglas, [danna], {
-        compromisos: [turno(danna, 'Student Dining', '17:00', '21:00', { category: 'student-dining' })],
+    const r = escenario(reglas, [conTurnoTarde], {
+        compromisos: [turno(conTurnoTarde, 'Student Dining', '17:00', '21:00', { category: 'student-dining' })],
         ventanas: { barnyard: ventana('09:00', '13:00') }
     });
 
