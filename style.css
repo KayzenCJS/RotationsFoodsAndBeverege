@@ -430,6 +430,121 @@ tr.row-critical, tr.row-critical td { background: var(--row-highlight-bg); }
     color: var(--text-primary);
     border-color: var(--accent-info);
 }
+/* ==================== CONSULTA POR LOCACION ENTRENADA ==================== */
+/* Usa las mismas variables y el mismo aspecto que el resto del modulo de
+   consultas. Se queda en un ancho cómodo y baja a una columna en móvil. */
+.query-pista {
+    display: flex; align-items: center; gap: .4rem;
+    margin: .5rem 0 0; font-size: .82rem; color: var(--text-tertiary);
+}
+
+.query-resumen {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 1rem; flex-wrap: wrap; margin-bottom: .75rem;
+}
+.query-resumen h4 { margin: 0; font-size: 1rem; }
+.query-total {
+    font-size: .85rem; font-weight: 600;
+    padding: .15rem .6rem; border-radius: 999px;
+    background: var(--bg-section, rgba(127, 127, 127, .12));
+}
+.query-departamentos { display: block; color: var(--text-tertiary); font-size: .76rem; margin-bottom: .6rem; }
+
+.query-filtros {
+    display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+    padding: .6rem .75rem; margin-bottom: .9rem;
+    border: 1px solid var(--border-soft, rgba(127, 127, 127, .25));
+    border-radius: 8px;
+    background: var(--bg-section, rgba(127, 127, 127, .06));
+}
+.query-filtros-titulo {
+    font-size: .78rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--text-tertiary);
+}
+.query-filtros select, .query-filtros input {
+    padding: .35rem .5rem; border-radius: 6px;
+    border: 1px solid var(--border-soft, rgba(127, 127, 127, .3));
+    background: var(--bg-card); color: var(--text-primary); font-size: .84rem;
+}
+
+.query-loc-bloque { margin-bottom: 1.25rem; }
+.query-loc-cabecera {
+    display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap;
+    margin-bottom: .15rem;
+}
+.query-loc-cabecera h4 { margin: 0; font-size: .98rem; }
+.query-loc-total {
+    font-weight: 700; font-size: .85rem;
+    padding: .05rem .5rem; border-radius: 999px;
+    background: var(--accent-info, #0288d1); color: #fff;
+}
+.query-loc-fuente { display: block; color: var(--text-tertiary); font-size: .74rem; margin-bottom: .4rem; }
+
+.query-tabla {
+    width: 100%; border-collapse: collapse; font-size: .85rem;
+    margin-top: .3rem;
+}
+.query-tabla th, .query-tabla td {
+    padding: .45rem .6rem; text-align: left; vertical-align: top;
+    border-bottom: 1px solid var(--border-soft, rgba(127, 127, 127, .18));
+}
+.query-tabla th {
+    font-weight: 600; font-size: .75rem; text-transform: uppercase;
+    letter-spacing: .03em; color: var(--text-tertiary);
+    background: var(--bg-card); position: sticky; top: 0; z-index: 1;
+}
+.query-tabla tbody tr:hover { background: var(--bg-hover, rgba(127, 127, 127, .07)); }
+
+.query-grupo {
+    display: inline-block; min-width: 1.15rem; text-align: center;
+    padding: .05rem .3rem; margin-right: .15rem; border-radius: 4px;
+    background: var(--bg-section, rgba(127, 127, 127, .16));
+    font-size: .78rem; font-weight: 600;
+}
+.query-sin-cert { color: var(--text-tertiary); font-style: italic; }
+
+.query-vacio {
+    padding: .9rem 1rem; margin-top: .6rem;
+    border: 1px dashed var(--border-emphasis, rgba(127, 127, 127, .35));
+    border-radius: 8px; text-align: center;
+}
+.query-vacio p { margin: 0 0 .3rem; }
+.query-vacio small { color: var(--text-tertiary); display: block; margin-top: .3rem; }
+.query-vacio-aviso { border-style: solid; border-color: var(--accent-warning, #b26a00); }
+
+.query-sugerencias {
+    display: flex; flex-wrap: wrap; gap: .35rem; justify-content: center;
+    margin-top: .55rem;
+}
+.query-chip {
+    padding: .18rem .55rem; border-radius: 999px; font-size: .78rem;
+    background: var(--bg-section, rgba(127, 127, 127, .14));
+    border: 1px solid var(--border-soft, rgba(127, 127, 127, .25));
+}
+
+.query-nota {
+    display: flex; align-items: flex-start; gap: .4rem;
+    margin-top: .9rem; font-size: .8rem; color: var(--text-tertiary);
+}
+
+@media (max-width: 720px) {
+    .query-filtros { flex-direction: column; align-items: stretch; }
+    .query-filtros select, .query-filtros input { width: 100%; }
+    /* En móvil la tabla no cabe: cada persona pasa a una tarjeta, que es lo que
+       ya se hacía en el resto del modulo de consultas. */
+    .query-tabla thead { display: none; }
+    .query-tabla, .query-tabla tbody, .query-tabla tr, .query-tabla td { display: block; width: 100%; }
+    .query-tabla tr {
+        border: 1px solid var(--border-soft, rgba(127, 127, 127, .22));
+        border-radius: 8px; padding: .5rem .6rem; margin-bottom: .5rem;
+    }
+    .query-tabla td { border: 0; padding: .2rem 0; }
+    .query-tabla td::before {
+        content: attr(data-col) ': ';
+        font-size: .74rem; color: var(--text-tertiary); text-transform: uppercase;
+    }
+}
+
 /* ==================== ASIGNACION AUTOMATICA ==================== */
 /* Pantalla de la propuesta de la asignacion automatica. Va al final del bloque
    de botones porque comparte sus variables de color. */

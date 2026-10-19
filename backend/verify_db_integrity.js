@@ -6,12 +6,17 @@ const db = require('./db');
 // locations crece a proposito (Living Shores, Bistro, Dunkin'), asi que se
 // comprueba que las esperadas estan, no que el total sea uno fijo.
 // employees y employee_availability NO van fijos a proposito: crecen cada vez
-// que se da de alta a alguien desde la interfaz. Lo que no puede pasar es que
-// un empleado exista sin su fila de disponibilidad, y eso se comprueba mas
-// abajo. El resto de tablas si son de configuracion y se comparan exactas.
+// que se da de alta a alguien desde la interfaz. Lo mismo pasa con
+// location_disables (cada vez que se cierra una localizacion) y con
+// schedule_notes (cada vez que se anota algo del dia): son registros de uso,
+// no de configuracion, y con un numero fijo solo daban una falsa alarma en
+// cuanto alguien usaba el sistema.
+//
+// Lo que no puede pasar es que un empleado exista sin su fila de
+// disponibilidad, o que una nota quede a medias. Eso se comprueba mas abajo,
+// por registro y no por recuento.
 const EXPECTED = {
   supervisor_assignments: 50, tasks: 0, employee_breaks: 4,
-  location_disables: 6,
   location_required_roles: 26, staffing_rules: 10, work_hours: 0
 };
 
@@ -29,9 +34,10 @@ const EXPECTED = {
   // Tablas que crecen con el uso diario: se avisa del numero, pero no es un
   // error. Lo que si se comprueba es que no haya quedaron a medias.
   const vivos = {};
-  for (const t of ['employees', 'employee_availability', 'employee_trainings', 'assignments']) {
+  for (const t of ['employees', 'employee_availability', 'employee_trainings', 'assignments',
+                   'location_disables', 'schedule_notes', 'employee_location_training']) {
     vivos[t] = (await p.query('SELECT count(*)::int n FROM ' + t)).rows[0].n;
-    console.log('  ---  ' + t.padEnd(24) + vivos[t] + '  (crece con el uso)');
+    console.log('  ---  ' + t.padEnd(26) + vivos[t] + '  (crece con el uso)');
   }
   const sinDisponibilidad = (await p.query(
     `SELECT count(*)::int n FROM employees e
@@ -83,9 +89,19 @@ const EXPECTED = {
   console.log('\n=== estructura nueva ===');
   const cats = (await p.query('SELECT section, count(*)::int n FROM schedule_categories GROUP BY section ORDER BY section')).rows;
   cats.forEach(r => console.log('  ' + r.section.padEnd(16) + r.n + ' categorías'));
+  // Las notas del dia son un registro de uso: se anaden cuando alguien anota
+  // algo del horario. Que haya no es un problema, asi que ya no cuentan como
+  // error (antes exigian cero y saltaba la alarma en cuanto alguien escribia
+  // una nota de verdad). Lo que si se comprueba es que no queden a medias:
+  // una nota sin fecha o en blanco no sirve de nada.
   const notes = (await p.query('SELECT count(*)::int n FROM schedule_notes')).rows[0].n;
-  console.log('  schedule_notes  ' + notes + ' filas (0 tras la limpieza)');
-  if (notes !== 0) { console.log('  ATENCION: quedan notas de prueba'); bad++; }
+  const notasAmedias = (await p.query(
+    "SELECT count(*)::int n FROM schedule_notes WHERE work_date IS NULL OR btrim(note) = ''")).rows[0].n;
+  if (notasAmedias) {
+    console.log('  FALLO ' + notasAmedias + ' notas sin fecha o en blanco'); bad++;
+  } else {
+    console.log('  ok   ' + notes + ' nota(s), ninguna a medias');
+  }
   const ls = (await p.query("SELECT * FROM locations WHERE id='living-shores'")).rows[0];
   console.log('  Living Shores   ' + (ls ? ls.name + ' / ' + ls.type + ' / ' + ls.category : 'NO EXISTE'));
   if (!ls) bad++;

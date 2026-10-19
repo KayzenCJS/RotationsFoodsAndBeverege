@@ -1961,6 +1961,12 @@ montarRutasExportacionHorario(app, getPool);
 const { montarRutasAutoAssign } = require('./auto-assign-routes');
 montarRutasAutoAssign(app, getPool);
 
+// Consultas por localizacion entrenada. Responde "quien esta entrenado aqui"
+// leyendo la tabla employee_location_training, que es el apartado
+// "Locaciones entrenadas" del perfil de cada persona.
+const { montarRutasEntrenados } = require('./trained-at-routes');
+montarRutasEntrenados(app, getPool, () => ({ foods, retail }));
+
 // POST /api/:type/import/validate -> preview autoritativo, no escribe nada
 app.post('/api/:type/import/validate', async (req, res) => {
     try {

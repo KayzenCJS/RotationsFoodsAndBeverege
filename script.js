@@ -2680,7 +2680,10 @@ function findBreakInfoForAssignment(assignmentId) {
     return `${selfBreakLabel}, ${breakRecord.break_start_time || '--:--'} - ${breakRecord.break_end_time || '--:--'}`;
 }
 
-function processQuery() {
+// Consulta de la pestaña "Por Empleado". Se llama desde queries.js, que decide
+// antes si la pregunta va de gente entrenada en una localizacion y, si es asi,
+// contesta con esos datos. Aqui queda la busqueda de siempre.
+function processQueryOriginal() {
     const input = document.getElementById('queryInput')?.value || '';
     const query = normalizeQuery(input);
     const container = document.getElementById('queryResults');
@@ -2774,15 +2777,29 @@ function switchQueryTab(tab) {
     document.querySelectorAll('.query-tab').forEach(t => t.classList.remove('active'));
     event.target.classList.add('active');
 
-    if (tab === 'employees') {
-        document.getElementById('employeeQueryTab').style.display = 'block';
-        document.getElementById('locationQueryTab').style.display = 'none';
-    } else {
-        document.getElementById('employeeQueryTab').style.display = 'none';
-        document.getElementById('locationQueryTab').style.display = 'block';
+    // Tres pestañas: por persona, por localizacion (asignaciones del día) y por
+    // localizacion entrenada (el perfil de cada persona). Se muestran de una en
+    // una y el hueco de resultados de abajo se limpia al cambiar.
+    //
+    // El catalogo de la pestaña nueva se pide una sola vez, la primera vez que
+    // se abre: el desplegable tiene que salir de la base, no de una lista
+    // escrita en el HTML.
+    const paneles = {
+        employees: 'employeeQueryTab',
+        locations: 'locationQueryTab',
+        trained: 'trainedQueryTab'
+    };
+
+    for (const clave of Object.keys(paneles)) {
+        const el = document.getElementById(paneles[clave]);
+        if (el) el.style.display = clave === tab ? 'block' : 'none';
     }
 
     document.getElementById('queryResults').innerHTML = '';
+
+    if (tab === 'trained' && typeof cargarCatalogoEntrenados === 'function') {
+        cargarCatalogoEntrenados();
+    }
 }
 
 async function queryByLocation() {
@@ -5092,6 +5109,48 @@ const I18N = {
         'management.quickStore': 'Tienda',
         'management.search': 'Consultar',
         'management.smartQueries': 'Consultas Inteligentes',
+        // Consulta por locación entrenada. Ver queries.js.
+        'queries.trainedTab': 'Por Locación Entrenada',
+        'queries.trainedHint': 'Muestra quién tiene esa localización en su apartado «Locaciones entrenadas», esté donde esté trabajando.',
+        'queries.trainedPlaceholder': 'Escribe una localización: Pixie, Food Fair, Farmstand…',
+        'queries.trainedFor': 'Personas entrenadas en {{loc}}',
+        'queries.trainedSource': 'Datos del apartado «Locaciones entrenadas» de cada perfil.',
+        'queries.trainedSince': 'Entrenado desde',
+        'queries.totalFound': '{{n}} persona(s) encontrada(s)',
+        'queries.noneTrained': 'No hay ningún empleado registrado como entrenado en {{loc}}.',
+        'queries.noneTrainedHint': 'Esa localización todavía no tiene entrenamiento registrado en ningún perfil. No se muestran personas de otros sitios ni del historial de turnos: solo lo que está en la ficha.',
+        'queries.noneMatchFilters': 'Nadie entrenado en {{loc}} cumple el filtro.',
+        'queries.noneMatchFiltersHint': 'Sí hay gente registrada como entrenada en esta localización, pero ninguno coincide con el filtro de rol, grupo o certificación. Quítalo para verlos a todos.',
+        'queries.noLocationMatch': 'Ninguna localización se parece a «{{q}}».',
+        'queries.didYouMean': 'Localizaciones que sí existen:',
+        'queries.whyNoData': 'Localizaciones sin nadie registrado',
+        'queries.whyNoDataHint': 'Estas localizaciones no tienen entrenamiento registrado en ningún perfil. No significa que no haya quien pueda trabajar ahí, sino que nadie lo tiene anotado todavía.',
+        'queries.multiMatch': 'La búsqueda coincide con varias localizaciones; se muestran todas.',
+        'queries.filters': 'Filtros',
+        'queries.filterRole': 'Rol',
+        'queries.filterGroup': 'Grupo',
+        'queries.filterCert': 'Certificación',
+        'queries.filterDept': 'Departamento',
+        'queries.anyRole': 'Cualquier rol',
+        'queries.anyGroup': 'Cualquier grupo',
+        'queries.anyCert': 'Cualquier certificación',
+        'queries.applyFilters': 'Aplicar',
+        'queries.clearFilters': 'Quitar filtros',
+        'queries.colName': 'Nombre',
+        'queries.colRole': 'Rol',
+        'queries.colGroup': 'Grupo',
+        'queries.colDept': 'Departamento',
+        'queries.colStatus': 'Estado',
+        'queries.colSince': 'Entrenado desde',
+        'queries.colCerts': 'Certificaciones',
+        'queries.noCerts': 'Sin certificaciones',
+        'queries.certCount': '{{n}} certificación(es)',
+        'queries.moreCerts': 'y {{n}} más',
+        'queries.searchByName': 'Filtrar por nombre…',
+        'queries.departmentFoods': 'Foods',
+        'queries.departmentRetail': 'Retail',
+        'queries.departmentNote': 'Reparto actual: {{foods}} en Foods, {{retail}} en Retail.',
+        'queries.certMeaning': 'Estar entrenado en una localización no es lo mismo que poder cubrir un puesto: puede faltar alguna certificación que el puesto exija.',
         'management.smartQueriesHint': 'Busca por habilidad, área o nombre...',
         'management.specificDate': 'Fecha específica',
         'management.subtitle': 'Administra empleados, asigna personal a locaciones y gestiona tareas',
@@ -6185,6 +6244,47 @@ const I18N = {
         'management.quickStore': 'Store',
         'management.search': 'Search',
         'management.smartQueries': 'Smart Queries',
+        'queries.trainedTab': 'By Trained Location',
+        'queries.trainedHint': 'Shows who has that location in their "Trained locations" section, wherever they are working now.',
+        'queries.trainedPlaceholder': 'Type a location: Pixie, Food Fair, Farmstand…',
+        'queries.trainedFor': 'People trained at {{loc}}',
+        'queries.trainedSource': 'From each profile\'s "Trained locations" section.',
+        'queries.trainedSince': 'Trained since',
+        'queries.totalFound': '{{n}} person/people found',
+        'queries.noneTrained': 'No employee is registered as trained at {{loc}}.',
+        'queries.noneTrainedHint': 'That location has no training registered on any profile yet. People from elsewhere and from the shift history are not shown: only what is on the record.',
+        'queries.noneMatchFilters': 'Nobody trained at {{loc}} matches the filter.',
+        'queries.noneMatchFiltersHint': 'There are people registered as trained at this location, but none match the role, group or certification filter. Clear it to see them all.',
+        'queries.noLocationMatch': 'No location looks like "{{q}}".',
+        'queries.didYouMean': 'Locations that do exist:',
+        'queries.whyNoData': 'Locations with nobody registered',
+        'queries.whyNoDataHint': 'These locations have no training registered on any profile. That does not mean nobody can work there, only that nobody has written it down yet.',
+        'queries.multiMatch': 'The search matches several locations; all of them are shown.',
+        'queries.filters': 'Filters',
+        'queries.filterRole': 'Role',
+        'queries.filterGroup': 'Group',
+        'queries.filterCert': 'Certification',
+        'queries.filterDept': 'Department',
+        'queries.anyRole': 'Any role',
+        'queries.anyGroup': 'Any group',
+        'queries.anyCert': 'Any certification',
+        'queries.applyFilters': 'Apply',
+        'queries.clearFilters': 'Clear filters',
+        'queries.colName': 'Name',
+        'queries.colRole': 'Role',
+        'queries.colGroup': 'Group',
+        'queries.colDept': 'Department',
+        'queries.colStatus': 'Status',
+        'queries.colSince': 'Trained since',
+        'queries.colCerts': 'Certifications',
+        'queries.noCerts': 'No certifications',
+        'queries.certCount': '{{n}} certification(s)',
+        'queries.moreCerts': 'and {{n}} more',
+        'queries.searchByName': 'Filter by name…',
+        'queries.departmentFoods': 'Foods',
+        'queries.departmentRetail': 'Retail',
+        'queries.departmentNote': 'Current split: {{foods}} in Foods, {{retail}} in Retail.',
+        'queries.certMeaning': 'Being trained at a location is not the same as being able to take a post: a certification the post requires may still be missing.',
         'management.smartQueriesHint': 'Search by skill, area, or name...',
         'management.specificDate': 'Specific date',
         'management.subtitle': 'Manage employees, assign staff to locations, and manage tasks',

@@ -320,6 +320,7 @@
                     <div class="query-tabs">
                         <button class="query-tab active" onclick="switchQueryTab('employees')">Por Empleado</button>
                         <button class="query-tab" onclick="switchQueryTab('locations')">Por Locación</button>
+                        <button class="query-tab" onclick="switchQueryTab('trained')">Por Locación Entrenada</button>
                     </div>
 
                     <div id="employeeQueryTab">
@@ -343,6 +344,38 @@
                             </select>
                             <button class="btn btn-primary" onclick="queryByLocation()"><i class="fas fa-paper-plane"></i> Consultar</button>
                         </div>
+                    </div>
+
+                    <!--
+                        Consulta por LOCACIÓN ENTRENADA.
+
+                        Es distinta de la pestaña de arriba: aquella cuenta las
+                        asignaciones del día activo (quién trabaja hoy allí);
+                        esta muestra quién tiene esa localización en el apartado
+                        "Locaciones entrenadas" de su perfil, esté donde esté.
+                        Se separan porque contestan a preguntas distintas y los
+                        datos no se mezclan.
+
+                        El desplegable se llena desde la base (ver queries.js) y
+                        el campo de texto acepta los nombres como los escribe la
+                        gente: "Farmstand", "Dunkin Donuts", "Oasis".
+                    -->
+                    <div id="trainedQueryTab" style="display:none;">
+                        <div class="query-input">
+                            <select id="trainedLocationSelect" style="flex:1; padding:0.75rem; border-radius:8px; ">
+                                <option value="">Seleccionar locación...</option>
+                            </select>
+                            <input type="text" id="trainedLocationInput" style="flex:1; padding:0.75rem; border-radius:8px; "
+                                   placeholder="Pixie, Food Fair, Farmstand..." />
+                            <button class="btn btn-primary" onclick="consultarEntrenados()">
+                                <i class="fas fa-paper-plane"></i> Consultar
+                            </button>
+                        </div>
+                        <p class="query-pista">
+                            <i class="fas fa-circle-info"></i>
+                            Sale del apartado «Locaciones entrenadas» de cada perfil, no del historial de turnos.
+                        </p>
+                        <div id="trainedQueryResults"></div>
                     </div>
 
                     <div class="query-results" id="queryResults"></div>
@@ -1061,6 +1094,12 @@
         backend una propuesta y la ensena antes de guardarla.
     -->
     <script src="auto-assign-module.js"></script>
+    <!--
+        Consultas por localizacion entrenada. Define processQuery(), que decide
+        si una pregunta va por aqui o por la busqueda de siempre, y
+        consultarEntrenados(), que usa su propia pestaña.
+    -->
+    <script src="queries.js"></script>
 
 <!-- ===== IMPORTADOR DE EXCEL ===== -->
 <div class="modal" id="excelImportModal">
