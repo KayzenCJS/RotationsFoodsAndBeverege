@@ -23,15 +23,31 @@
                 <div class="nav-logo">
                     <h1>Story<span>Manager</span></h1>
                 </div>
+                <!--
+                    MENÚ PRINCIPAL
+
+                    Solo cuatro entradas. Antes había nueve, y cinco de ellas
+                    eran accesos sueltos a herramientas que ya están dentro del
+                    panel de Foods (Gestión, Tareas, Reportes, Inspecciones,
+                    Administración). Eso obligaba a saber de memoria qué título
+                    del menú abría cada cosa.
+
+                    Ahora el menú dice DÓNDE estás (Inicio, Foods, Retail,
+                    Wastelog) y el submenú de Foods dice QUÉ estás haciendo. Las
+                    cinco funciones siguen vivas: ninguna se ha quitado del
+                    sistema, solo han dejado de tener un título propio en el menú
+                    para que no hubiera dos puertas a la misma herramienta.
+
+                    "Retail" es el mismo panel con el otro tipo de datos, así que
+                    comparte el submenú. Los enlaces que abren un módulo aparte
+                    (inspecciones, reportes, administración) usan href="#" para
+                    que setupNavigation() no intente hacer scroll a un ancla
+                    que no existe; el onclick hace el trabajo.
+                -->
                 <ul class="nav-menu">
                     <li class="nav-item"><a href="#inicio" class="nav-link" onclick="updateStats()" data-i18n="nav.home">Inicio</a></li>
                     <li class="nav-item"><a href="#servicios" class="nav-link" onclick="switchType('foods')">Foods</a></li>
                     <li class="nav-item"><a href="#servicios" class="nav-link" onclick="switchType('retail')">Retail</a></li>
-                    <li class="nav-item"><a href="#demo" class="nav-link" onclick="loadInitialData()" data-i18n="nav.management">Gestión</a></li>
-                    <li class="nav-item"><a href="#tasks" class="nav-link" onclick="scrollToTasks(); refreshTasksPanel();" data-i18n="nav.tasks">Tareas</a></li>
-                    <li class="nav-item"><a href="#" class="nav-link" onclick="openTrainingReports()" data-i18n="nav.reports">Reportes</a></li>
-                    <li class="nav-item"><a href="#" class="nav-link" onclick="openInspectionsModule()" data-i18n="nav.inspections">Inspections</a></li>
-                    <li class="nav-item"><a href="#" class="nav-link" onclick="openAdminPanel()" data-i18n="nav.admin">Admin</a></li>
                     <li class="nav-item"><a href="#" class="nav-link" onclick="openWastelog()">Wastelog</a></li>
                     <li class="nav-item">
                       <div class="language-selector">
@@ -105,12 +121,23 @@
         </div>
     </section>
 
-    <!-- Demo / Management Section -->
+    <!--
+        PANEL OPERATIVO
+
+        Antes era "Panel de Gestión" y tenía su propio título en el menú. Ahora no
+        lo tiene: es la segunda mitad de Foods, y el submenú de arriba es el que
+        dice qué parte se está usando.
+
+        Cada bloque tiene un id estable (panelEmployees, panelSchedule, ...)
+        porque el submenú navega a ellos. Antes no lo tenían: el submenú tendría
+        que buscar el bloque "con un h3 que diga X", que se rompe en cuanto se
+        traduce el título.
+    -->
     <section id="demo" class="demo">
         <div class="container">
             <div class="section-header">
-                <h2>Panel de Gestión</h2>
-                <p>Administra empleados, asigna personal a locaciones y gestiona tareas</p>
+                <h2 data-i18n="panel.title">Panel operativo</h2>
+                <p data-i18n="panel.subtitle">Empleados, horarios, tareas e inspecciones del parque</p>
                 <div style="display:flex; justify-content:center; gap:1rem; flex-wrap:wrap; margin-top:1rem;">
                     <button class="btn btn-secondary" onclick="openExcelImport()"><i class="fas fa-file-import"></i> <span data-i18n="imp.button">Importar Excel</span></button>
                         <button class="btn btn-success-solid" onclick="exportToExcel()">
@@ -122,8 +149,49 @@
                 </div>
             </div>
 
+            <!--
+                Submenú de Foods.
+
+                Siete accesos a herramientas que YA existían, ninguno nuevo:
+                cuatro son bloques de este mismo panel, tres abren módulos que ya
+                estaban sueltos en el menú principal.
+
+                No se crea una segunda versión de nada. Cada botón o hace scroll
+                a un bloque que ya está aquí, o llama al mismo openX() que
+                llamaba antes el título del menú. Los que abren un módulo
+                (inspecciones, reportes, locaciones) vuelven a dejar este panel
+                como estaba al cerrar, para que no se quede medio escondido.
+
+                data-panel es lo que lee IrAPanel(); el texto visible va con
+                data-i18n para que se traduzca solo.
+            -->
+            <nav class="panel-subnav" id="panelSubnav">
+                <button class="panel-subnav-item" data-panel="panelSchedule" onclick="irAPanel('panelSchedule')">
+                    <i class="fas fa-calendar-alt"></i> <span data-i18n="panel.schedule">Schedule</span>
+                </button>
+                <button class="panel-subnav-item" data-panel="panelEmployees" onclick="irAPanel('panelEmployees')">
+                    <i class="fas fa-users"></i> <span data-i18n="panel.employees">Employees</span>
+                </button>
+                <button class="panel-subnav-item" data-panel="panelLocations" onclick="irAPanel('panelLocations')">
+                    <i class="fas fa-store-slash"></i> <span data-i18n="panel.locations">Locations</span>
+                </button>
+                <button class="panel-subnav-item" data-panel="panelTasks" onclick="irAPanel('panelTasks')">
+                    <i class="fas fa-tasks"></i> <span data-i18n="panel.tasks">Tasks</span>
+                </button>
+                <button class="panel-subnav-item" data-panel="panelQueries" onclick="irAPanel('panelQueries')">
+                    <i class="fas fa-search"></i> <span data-i18n="panel.queries">Smart Queries</span>
+                </button>
+                <button class="panel-subnav-item" data-panel="inspections" onclick="irAPanel('inspections')">
+                    <i class="fas fa-clipboard-check"></i> <span data-i18n="panel.inspections">Inspections &amp; Corrections</span>
+                </button>
+                <button class="panel-subnav-item" data-panel="reports" onclick="irAPanel('reports')">
+                    <i class="fas fa-chart-bar"></i> <span data-i18n="panel.reports">Reports</span>
+                </button>
+            </nav>
+
             <!-- Employee Management -->
-            <div class="demo-section employee-management-section">
+            <!-- id="panelEmployees": destino del submenú de Foods -->
+            <div class="demo-section employee-management-section" id="panelEmployees">
                 <div class="employee-admin-layout">
                     <aside class="employee-sidebar">
                         <h4 data-i18n="employees.sidebarTitle">Employee Management</h4>
@@ -196,8 +264,8 @@
                 </div>
             </div>
 
-            <!-- Location Assignment -->
-            <div class="demo-section">
+            <!-- Location Assignment: id="panelSchedule", destino del submenú -->
+            <div class="demo-section" id="panelSchedule">
                 <div class="section-title">
                     <h3><i class="fas fa-utensils"></i> Asignación a Locaciones</h3>
                     <!--
@@ -312,7 +380,8 @@
             </div>
 
             <!-- Smart Query -->
-            <div class="demo-section">
+            <!-- Consultas Inteligentes: id="panelQueries", destino del submenú -->
+            <div class="demo-section" id="panelQueries">
                 <div class="section-title">
                     <h3><i class="fas fa-search"></i> Consultas Inteligentes</h3>
                 </div>
@@ -382,8 +451,12 @@
                 </div>
             </div>
 
-            <!-- Task Management -->
-            <div class="demo-section">
+            <!-- Task Management: id="panelTasks", destino del submenú.
+                 Antes tenía además un título propio en el menú que apuntaba a
+                 "#tasks", un ancla que no existía en el HTML: la función que
+                 la arreglaba buscaba ese id, no lo encontraba y caía a una
+                 alternativa que acababa aquí. Dos puertas al mismo bloque. -->
+            <div class="demo-section" id="panelTasks">
                 <div class="section-title">
                     <h3><i class="fas fa-tasks"></i> Gestión de Tareas</h3>
                     <div style="display:flex; gap:0.5rem; align-items:center;">

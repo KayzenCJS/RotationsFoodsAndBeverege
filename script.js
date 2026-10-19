@@ -316,6 +316,14 @@ async function switchType(type) {
         }
     });
 
+    // Cambiar de Foods a Retail (o al revés) rehace el panel entero con datos
+    // de otro tipo, así que lo que estuviera abierto en el submenú ya no
+    // significa nada. Se limpia la marca y también la nota de qué bloques había
+    // visibles, que pertenecía al tipo anterior: si se guardara, al volver a un
+    // bloque se restauraría contra la lista equivocada.
+    limpiarSubnavActivo();
+    panelVisisiblesAntes = null;
+
     showNotification(`Cargando datos de ${type === 'foods' ? 'Foods' : 'Retail'}...`, 'info');
     
     try {
@@ -2599,7 +2607,18 @@ function editTask(id) {
 async function deleteTask(id) {
     if (!confirm(t('confirm.deleteTask'))) return;
     try {
-        await deleteTask(id);
+        // Se llama a deleteTaskDeApi, NO a deleteTask.
+        //
+        // Aquí se declara una función global llamada deleteTask que pisa la
+        // homónima de api.js. Escribir `deleteTask(id)` dentro era llamarse a sí
+        // misma: recursión infinita y un RangeError, sin borrarse nunca nada.
+        // Es el mismo choque de nombres que checkLocationDisabled y
+        // deactivateStaffingRule.
+        //
+        // Por eso api.js expone además esta copia con otro nombre. No se cambia
+        // el nombre original, que sigue usándose desde apiRequest y desde el
+        // HTML donde no hay sombra.
+        await deleteTaskDeApi(id);
         tasks = tasks.filter(t => t.id !== id);
         renderTasks();
         showNotification(t('notify.taskDeleted'), 'success');
@@ -2889,23 +2908,147 @@ function quickQuery(term) {
 // ============================================
 // NAVIGATION FUNCTIONS
 // ============================================
-function scrollToTasks() {
-    // Close admin panel if open
-    document.getElementById('adminLocationsSection').style.display = 'none';
-    document.getElementById('adminClosureHistorySection').style.display = 'none';
+// ============================================================================
+//  SUBMENÚ DE FOODS
+// ============================================================================
+//  Un único acceso por herramienta. El menú principal dice DÓNDE estás (Inicio,
+//  Foods, Retail, Wastelog) y este submenú dice QUÉ estás haciendo.
+//
+//  POR QUÉ UN SOLO PUNTO DE ENTRADA
+//  --------------------------------
+//  Antes cada herramienta tenía su propia puerta: cinco títulos en el menú
+//  principal (Gestión, Tareas, Reportes, Inspecciones, Administración) más los
+//  bloques del panel. Cuatro de esos títulos eran exactamente el mismo bloque
+//  del panel con otro nombre, y uno ("Tareas") apuntaba a un ancla que no
+//  existía: scrollToTasks() buscaba "#tasks-section", no lo encontraba y caía a
+//  una alternativa que acababa en el bloque de tareas. Dos caminos, un destino.
+//
+//  QUÉ HACE, Y QUÉ NO
+//  ------------------
+//  No crea ninguna copia de nada. Cuatro botones hacen scroll a un bloque que ya
+//  está en el panel, y tres llaman al mismo openX() que llamaba el título del
+//  menú antes. Las herramientas son exactamente las mismas; lo único que cambia
+//  es por dónde se llega a ellas.
+//
+//  AL VOLVER DE UN MÓDULO
+//  ----------------------
+//  Los tres que abren un módulo aparte (inspecciones, reportes, locaciones)
+//  ocultan los bloques del panel para dejar sitio. Volver al panel es volver a
+//  pulsar cualquiera de los otros cuatro botones: por eso antes de abrir uno se
+//  guardan los bloques que estaban visibles, y al volver se restauran.
+//  Sin eso, quien abriera inspecciones y volviera se encontraría el panel en
+//  blanco sin haber tocado nada.
+// ============================================================================
 
-    const tasksSection = document.getElementById('tasks-section');
-    if (tasksSection) {
-        tasksSection.scrollIntoView({ behavior: 'smooth' });
-    } else {
-        // Find the task management section
-        const taskSections = document.querySelectorAll('.demo-section');
-        taskSections.forEach(section => {
-            if (section.querySelector('#taskList')) {
-                section.scrollIntoView({ behavior: 'smooth' });
+// Qué bloques del panel estaban visibles antes de abrir un módulo que los
+// oculta. Se guarda para poder devolverlos exactamente como estaban.
+let panelVisisblesAntes = null;
+
+// Estado de navegación del panel.
+//
+// Va declarado aquí, antes de irAPanel, y no pegado a la función que lo usa:
+// switchType() también lo toca, y está definida más arriba en el fichero. Con
+// `let` no importa el orden (una función no lee esto hasta que se la llama, y
+// para entonces el script ya ha terminado de cargarse), pero declararlo en un
+// sitio y usarlo en dosclaro es pedir que alguien lo mueza después.
+let panelVisisiblesAntes = null;
+
+function irAPanel(destino) {
+    switch (destino) {
+
+        // --- Bloques que están en el panel: solo hay que llegar -------------
+        case 'panelSchedule':
+        case 'panelEmployees':
+        case 'panelTasks':
+        case 'panelQueries': {
+            restaurarPanelSiEstabaOculto();
+            const bloque = document.getElementById(destino);
+            if (!bloque) {
+                console.warn('[nav] el bloque ' + destino + ' no está en el HTML');
+                return;
             }
-        });
+            marcarSubnavActivo(destino);
+            desplazarA(bloque);
+            break;
+        }
+
+        // --- Locaciones: el panel de cierres, que ya existía ----------------
+        // Se reutiliza openAdminPanel() tal cual. Ese botón ya no está en el
+        // menú, pero la función no se toca: sigue siendo la forma de abrirlo y
+        // de paso se le quita el aviso de "panel abierto" que era ruido.
+        case 'panelLocations':
+            marcarSubnavActivo(destino);
+            openAdminPanel();
+            break;
+
+        // --- Inspecciones ----------------------------------------------------
+        case 'inspections':
+            marcarSubnavActivo(destino);
+            openInspectionsModule();
+            break;
+
+        // --- Reportes --------------------------------------------------------
+        case 'reports':
+            marcarSubnavActivo(destino);
+            openTrainingReports();
+            break;
+
+        default:
+            console.warn('[nav] destino desconocido: ' + destino);
     }
+}
+
+// remembers which blocks were visible before a module hid them.
+function guardarPanelVisible() {
+    if (panelVisisblesAntes) return;      // ya estaba guardado: no se pisa
+    panelVisisiblesAntes = Array.from(document.querySelectorAll('.demo-section'))
+        .filter(s => s.style.display !== 'none')
+        .map(s => s.id || null);
+}
+
+// Vuelve a dejar el panel como estaba. Se llama antes de abrir un bloque que no
+// lo oculta, por si se venía de inspecciones o del panel de locaciones.
+function restaurarPanelSiEstabaOculto() {
+    // El módulo de inspecciones vive FUERA de #demo, en su propia <section>, así
+    // que no la recoge el recorrido de .demo-section. Sin esta línea, al volver
+    // desde inspecciones se quedaría abierta encima del panel y se verían los
+    // dos a la vez.
+    //
+    // Antes esto no había que hacerlo porque tampoco había forma de volver: la
+    // única salida era cambiar de Foods a Retail, que es lo único que hacía
+    // switchType(). El submenú es ahora esa salida, y por eso cierra esto.
+    const inspecciones = document.getElementById('inspections');
+    if (inspecciones) inspecciones.style.display = 'none';
+
+    if (!panelVisisiblesAntes) return;
+
+    document.querySelectorAll('.demo-section').forEach(section => {
+        const id = section.id || null;
+        section.style.display = panelVisisiblesAntes.includes(id) ? '' : 'none';
+    });
+    panelVisisiblesAntes = null;
+}
+
+// Scroll suave dejando sitio para la cabecera fija.
+function desplazarA(elemento) {
+    const cabecera = document.querySelector('.header');
+    const alturaCabecera = cabecera ? cabecera.offsetHeight : 0;
+    const y = elemento.getBoundingClientRect().top + window.pageYOffset - alturaCabecera - 12;
+    window.scrollTo({ top: y, behavior: 'smooth' });
+}
+
+// Marca en el submenú qué herramienta está abierta, para que se vea dónde se
+// está. Solo uno a la vez: si varios estuvieran marcados no significaría nada.
+function marcarSubnavActivo(panel) {
+    document.querySelectorAll('.panel-subnav-item').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.panel === panel);
+    });
+}
+
+// Cuando se abre un módulo por otra vía (el botón antiguo que quedara, o una
+// tecla), el submenú no se queda diciendo otra cosa.
+function limpiarSubnavActivo() {
+    document.querySelectorAll('.panel-subnav-item').forEach(btn => btn.classList.remove('active'));
 }
 
 // La plataforma de Wastelog vive en su propia aplicacion (Cocina Control).
@@ -3951,6 +4094,12 @@ async function loadAssignmentsForDate(date) {
 function openAdminPanel() {
     console.log('Opening admin panel...');
 
+    // Se apunta que bloques estaban visibles ANTES de ocultarlos, para poder
+    // devolverlos cuando se vuelva a cualquier bloque del panel. Sin esto,
+    // quien abriera el panel de locaciones y luego pulsara "Schedule" en el
+    // submenú se encontraría el resto del panel en blanco.
+    guardarPanelVisible();
+
     // Hide all sections
     document.querySelectorAll('.demo-section').forEach(section => {
         section.style.display = 'none';
@@ -3971,11 +4120,19 @@ function openAdminPanel() {
         loadLocationDisablesForManagement(managementDate.value);
     }
 
-    showNotification(t('notify.panelOpened'), 'success');
+    // Sin aviso. Antes salía "Panel abierto" cada vez, y como el botón del menú
+    // ya no existe, solo se ve al llegar aquí desde el submenú de Locations: un
+    // aviso de algo que uno mismo acaba de pulsar no aporta nada.
 }
 
 async function openInspectionsModule() {
     console.log('Opening Inspections & Compliance...');
+
+    // Se apunta qué bloques estaban visibles antes de ocultarlos,
+    // para poder devolverlos al pulsar cualquier bloque del submenú de Foods.
+    // Este módulo oculta todos los .demo-section: sin esta nota, al volver
+    // al panel se lo encontraría medio en blanco sin haber tocado nada.
+    guardarPanelVisible();
 
     // Hide all sections
     document.querySelectorAll('.demo-section').forEach(section => {
@@ -5063,6 +5220,19 @@ const I18N = {
 
         // ---------- navegacion ----------
         'nav.admin': 'Administración',
+        // Submenú del panel de Foods. Reemplazan a los títulos que estaban
+        // sueltos en el menú principal (Gestión, Tareas, Reportes,
+        // Inspecciones, Administración), que eran dos puertas a lo mismo.
+        'nav.panel': 'Herramientas',
+        'panel.title': 'Panel operativo',
+        'panel.subtitle': 'Empleados, horarios, tareas e inspecciones del parque',
+        'panel.schedule': 'Horarios',
+        'panel.employees': 'Empleados',
+        'panel.locations': 'Locaciones',
+        'panel.tasks': 'Tareas',
+        'panel.queries': 'Consultas',
+        'panel.inspections': 'Inspecciones y correcciones',
+        'panel.reports': 'Reportes',
         'nav.changeTheme': 'Cambiar tema',
         'nav.foods': 'Foods',
         'nav.home': 'Inicio',
@@ -6198,6 +6368,16 @@ const I18N = {
 
         // ---------- navegacion ----------
         'nav.admin': 'Admin',
+        'nav.panel': 'Tools',
+        'panel.title': 'Operations panel',
+        'panel.subtitle': 'Employees, schedules, tasks and inspections for the park',
+        'panel.schedule': 'Schedule',
+        'panel.employees': 'Employees',
+        'panel.locations': 'Locations',
+        'panel.tasks': 'Tasks',
+        'panel.queries': 'Smart Queries',
+        'panel.inspections': 'Inspections & Corrections',
+        'panel.reports': 'Reports',
         'nav.changeTheme': 'Change theme',
         'nav.foods': 'Foods',
         'nav.home': 'Home',

@@ -545,6 +545,81 @@ tr.row-critical, tr.row-critical td { background: var(--row-highlight-bg); }
     }
 }
 
+/* ==================== SUBMENÚ DE FOODS ==================== */
+/* Los siete accesos a las herramientas del panel operativo.
+   Reemplazan a cinco títulos que estaban sueltos en el menú principal (Gestión,
+   Tareas, Reportes, Inspecciones, Administración), que eran dos puertas a lo
+   mismo. Aquí se ve a la vez dónde estás y qué estás usando. */
+.panel-subnav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    margin: 0 0 1.5rem;
+    padding: .5rem;
+    border-radius: 10px;
+    background: var(--bg-section, rgba(127, 127, 127, .07));
+    border: 1px solid var(--border-soft, rgba(127, 127, 127, .2));
+}
+
+.panel-subnav-item {
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    padding: .5rem .85rem;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary, inherit);
+    font-size: .86rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s;
+    white-space: nowrap;
+}
+
+.panel-subnav-item i {
+    font-size: .82rem;
+    opacity: .75;
+}
+
+.panel-subnav-item:hover {
+    background: var(--bg-card, rgba(255, 255, 255, .6));
+    border-color: var(--border-soft, rgba(127, 127, 127, .3));
+    color: var(--text-primary, inherit);
+}
+
+/* La herramienta abierta. Solo una puede estar marcada: si varias, el indicador
+   no diría nada. */
+.panel-subnav-item.active {
+    background: var(--primary-color, #c8102e);
+    border-color: var(--primary-color, #c8102e);
+    color: #fff;
+    font-weight: 600;
+}
+.panel-subnav-item.active i { opacity: 1; }
+
+/* Foco visible para quien navega con teclado: sin esto no se sabe dónde está. */
+.panel-subnav-item:focus-visible {
+    outline: 2px solid var(--primary-color, #c8102e);
+    outline-offset: 2px;
+}
+
+@media (max-width: 780px) {
+    .panel-subnav {
+        /* En móvil los siete botones en una fila no caben ni se leen. Pasan a
+           una columna con el icono encima del texto. */
+        flex-direction: column;
+        align-items: stretch;
+        padding: .4rem;
+    }
+    .panel-subnav-item {
+        width: 100%;
+        justify-content: flex-start;
+        white-space: normal;
+    }
+}
+
 /* ==================== ASIGNACION AUTOMATICA ==================== */
 /* Pantalla de la propuesta de la asignacion automatica. Va al final del bloque
    de botones porque comparte sus variables de color. */

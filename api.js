@@ -230,6 +230,20 @@ async function deleteTask(id) {
     });
 }
 
+// Referencia a la función de ARRIBA, capturada mientras esta es la global.
+//
+// script.js declara después su propia `deleteTask` global (la que pregunta por
+// confirmación y repinta) y pisa a esta. Si deleteTaskDeApi la llamara por
+// nombre, resolvería a la de script.js y la recursión volvería a aparecer.
+//
+// Guardando la referencia en una constante al definirla, el vínculo queda
+// resuelto para siempre y esta función siempre habla con el servidor.
+const _borrarTareaEnServidor = deleteTask;
+
+async function deleteTaskDeApi(id) {
+    return await _borrarTareaEnServidor(id);
+}
+
 // ============================================
 // HEALTH CHECK
 // ============================================
