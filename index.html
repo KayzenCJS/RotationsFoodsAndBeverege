@@ -1055,6 +1055,12 @@
     <script src="inspections-combo.js"></script>
     <script src="inspections-module.js"></script>
     <script src="script.js"></script>
+    <!--
+        Va DESPUES de script.js a proposito: define optimizeAssignment(), y si se
+        cargara antes, la version antigua de script.js la pisaria. Esta pide al
+        backend una propuesta y la ensena antes de guardarla.
+    -->
+    <script src="auto-assign-module.js"></script>
 
 <!-- ===== IMPORTADOR DE EXCEL ===== -->
 <div class="modal" id="excelImportModal">

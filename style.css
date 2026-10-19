@@ -430,6 +430,137 @@ tr.row-critical, tr.row-critical td { background: var(--row-highlight-bg); }
     color: var(--text-primary);
     border-color: var(--accent-info);
 }
+/* ==================== ASIGNACION AUTOMATICA ==================== */
+/* Pantalla de la propuesta de la asignacion automatica. Va al final del bloque
+   de botones porque comparte sus variables de color. */
+.auto-assign-modal .modal-content { width: 1000px; max-width: 94vw; }
+
+.auto-assign-cabecera {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius-md, 8px);
+    margin-bottom: 1rem;
+    border: 1px solid var(--border-subtle, rgba(127, 127, 127, .25));
+}
+.auto-assign-cabecera.auto-assign-ok {
+    background: color-mix(in srgb, var(--accent-success-solid, #2e7d32) 12%, transparent);
+    border-color: color-mix(in srgb, var(--accent-success-solid, #2e7d32) 40%, transparent);
+}
+.auto-assign-cabecera.auto-assign-parcial {
+    background: color-mix(in srgb, var(--accent-warning, #b26a00) 14%, transparent);
+    border-color: color-mix(in srgb, var(--accent-warning, #b26a00) 45%, transparent);
+}
+
+.auto-assign-cifras { display: flex; gap: 1.75rem; flex-wrap: wrap; }
+.auto-assign-cifra { display: flex; flex-direction: column; }
+.auto-assign-cifra .cifra { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+.auto-assign-cifra .etiqueta { font-size: .78rem; color: var(--text-tertiary); }
+.auto-assign-titular { font-weight: 600; font-size: .95rem; }
+
+.auto-assign-bloque { margin-bottom: 1.25rem; }
+.auto-assign-bloque > h5 {
+    display: flex; align-items: center; gap: .45rem;
+    margin: 0 0 .5rem; font-size: .95rem;
+}
+
+.auto-assign-tablero { max-height: 260px; overflow-y: auto; }
+.auto-assign-tabla {
+    width: 100%; border-collapse: collapse; font-size: .84rem;
+}
+.auto-assign-tabla th, .auto-assign-tabla td {
+    padding: .45rem .6rem; text-align: left;
+    border-bottom: 1px solid var(--border-subtle, rgba(127, 127, 127, .18));
+    vertical-align: top;
+}
+.auto-assign-tabla th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--bg-card);
+    font-weight: 600; font-size: .78rem;
+    text-transform: uppercase; letter-spacing: .03em;
+    color: var(--text-tertiary);
+}
+.auto-assign-tabla tbody tr:hover { background: var(--bg-hover, rgba(127, 127, 127, .08)); }
+
+/* Un intercambio es una reasignacion hecha para no dejar un hueco: se marca
+   para que se distinga de una asignacion directa. */
+.auto-assign-intercambio td { background: color-mix(in srgb, var(--accent-info, #0288d1) 8%, transparent); }
+
+.auto-assign-motivo { color: var(--text-secondary); font-size: .8rem; }
+.auto-assign-id { color: var(--text-tertiary); margin-left: .25rem; }
+.auto-assign-cert {
+    display: block; color: var(--accent-warning, #b26a00);
+    font-size: .72rem; margin-top: .1rem;
+}
+.auto-assign-avisos-lista {
+    display: block; color: var(--text-tertiary);
+    font-size: .72rem; margin-top: .15rem;
+}
+
+.auto-assign-pill {
+    display: inline-block; padding: .12rem .5rem;
+    border-radius: 999px; font-size: .74rem; font-weight: 600; white-space: nowrap;
+}
+.pill-ok { background: color-mix(in srgb, var(--accent-success-solid, #2e7d32) 18%, transparent); }
+.pill-falta { background: color-mix(in srgb, var(--accent-danger-solid, #c62828) 18%, transparent); }
+.pill-cerrada { background: color-mix(in srgb, var(--text-tertiary, #888) 22%, transparent); }
+
+.auto-assign-cuenta {
+    display: inline-block; min-width: 1.9rem; text-align: center;
+    font-variant-numeric: tabular-nums; font-weight: 700;
+    margin-right: .3rem;
+}
+
+.auto-assign-huecos .auto-assign-tabla td { font-size: .82rem; }
+
+.auto-assign-avisos {
+    padding: .85rem 1rem; margin-bottom: 1.1rem;
+    border: 1px dashed var(--border-emphasis, rgba(127, 127, 127, .4));
+    border-radius: 8px;
+}
+.auto-assign-avisos h5 { margin: 0 0 .5rem; font-size: .88rem; display: flex; gap: .4rem; align-items: center; }
+.auto-assign-aviso { margin-bottom: .45rem; font-size: .84rem; }
+.auto-assign-aviso small { display: block; color: var(--text-tertiary); font-size: .76rem; margin-top: .1rem; }
+
+.auto-assign-nota {
+    padding: .6rem .85rem; margin-bottom: 1rem; font-size: .84rem;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent-info, #0288d1) 10%, transparent);
+}
+
+.auto-assign-descartes { list-style: none; margin: 0; padding: 0; }
+.auto-assign-descartes li {
+    display: flex; align-items: baseline; gap: .35rem;
+    padding: .28rem 0; font-size: .84rem;
+    border-bottom: 1px solid var(--border-subtle, rgba(127, 127, 127, .14));
+}
+.auto-assign-descartes small { color: var(--text-tertiary); font-size: .75rem; margin-left: auto; }
+
+.auto-assign-pie {
+    position: sticky; bottom: -1rem;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem; flex-wrap: wrap;
+    padding: .9rem 0 .2rem; margin-top: .5rem;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border-subtle, rgba(127, 127, 127, .2));
+}
+.auto-assign-pie-nota {
+    display: flex; align-items: center; gap: .45rem;
+    font-size: .8rem; color: var(--text-tertiary); flex: 1 1 260px;
+}
+.auto-assign-pie-botones { display: flex; gap: .6rem; }
+
+@media (max-width: 640px) {
+    .auto-assign-cifras { gap: 1rem; }
+    .auto-assign-cifra .cifra { font-size: 1.2rem; }
+    .auto-assign-pie { flex-direction: column; align-items: stretch; }
+    .auto-assign-pie-botones { justify-content: stretch; }
+    .auto-assign-pie-botones .btn { flex: 1; }
+}
+
 .btn-full { width:100%; }
 
 /* Fila de acciones de un titulo de seccion.

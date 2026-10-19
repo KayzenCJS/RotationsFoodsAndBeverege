@@ -1955,6 +1955,12 @@ montarRutasAuditoria(app, getPool);
 const { montarRutasExportacionHorario } = require('./schedule-export-routes');
 montarRutasExportacionHorario(app, getPool);
 
+// Asignacion automatica inteligente. Propone un reparto que respete los
+// minimos de staffing_rules, los compromisos ya confirmados y las
+// certificaciones, y no guarda nada hasta que el usuario lo confirma.
+const { montarRutasAutoAssign } = require('./auto-assign-routes');
+montarRutasAutoAssign(app, getPool);
+
 // POST /api/:type/import/validate -> preview autoritativo, no escribe nada
 app.post('/api/:type/import/validate', async (req, res) => {
     try {

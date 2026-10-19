@@ -2648,64 +2648,12 @@ document.getElementById('taskForm').addEventListener('submit', async function(e)
 // ============================================
 // OPTIMIZATION
 // ============================================
-function optimizeAssignment() {
-    const date = document.getElementById('workDate').value;
-    const results = [];
-    const assignedEmployees = new Set();
-
-    locations.forEach(loc => {
-        // Enhanced availability check considering versatile employees and conflicts
-        const available = employees.filter(emp => {
-            if (!isEmployeeAvailable(emp)) return false;
-
-            // Skip if already assigned
-            if (assignedEmployees.has(emp.id)) return false;
-
-            // If location has no specific role requirements, any available employee works
-            if (loc.requiredRoles.length === 0) return true;
-
-            // Check if employee can perform any of the required roles
-            const canPerformRole = loc.requiredRoles.some(role => {
-                if (isEmployeeVersatile(emp)) {
-                    const availableRoles = getAvailableRoles(emp);
-                    return availableRoles.includes(role);
-                }
-                return emp.role === role;
-            });
-
-            return canPerformRole;
-        });
-
-        if (available.length > 0) {
-            const emp = available[0];
-            // Determine which role they're being assigned to
-            const assignedRole = isEmployeeVersatile(emp) && loc.requiredRoles.length > 0
-                ? loc.requiredRoles.find(role => getAvailableRoles(emp).includes(role)) || emp.role
-                : emp.role;
-
-            results.push({
-                locationId: loc.id,
-                locationName: loc.name,
-                employeeId: emp.id,
-                employeeName: emp.name,
-                employeeRole: assignedRole,
-                group: emp.group,
-                isVersatile: isEmployeeVersatile(emp),
-                primaryRole: emp.role,
-                workDate: date,
-                startTime: '09:00',
-                endTime: '18:00'
-            });
-
-            assignedEmployees.add(emp.id);
-        }
-    });
-
-    currentAssignments = results;
-    displayOptimizationResults(results);
-    renderLocationsGrid();
-    showNotification(t('assignments.optimizedMsg', { assigned: results.length, total: locations.length }), 'success');
-}
+// La asignacion automatica inteligente vive en auto-assign-module.js.
+//
+// Antes vivia aqui: un reparto que cogia la primera persona disponible para
+// cada localizacion, sin mirar minsimos por rol, sin certificados, sin zonas y
+// sin respetar lo que ya estaba asignado. Se ha movido al backend y ahora pide
+// una propuesta que se revisa antes de guardarse. Ver auto-assign-module.js.
 
 // ============================================
 // QUERY
@@ -5923,6 +5871,39 @@ const I18N = {
         'sched.sectionExtraTasks': 'Tareas Extra',
         'sched.sectionNostalgiaNight': 'Nostalgia Night',
         'sched.overnightHint': 'Turno de noche: si la hora de fin es menor que la de inicio, el turno termina al día siguiente.',
+        // Asignación automática inteligente. Ver auto-assign-module.js.
+        'autoAssign.titulo': 'Propuesta de asignación automática',
+        'autoAssign.calculando': 'Calculando...',
+        'autoAssign.guardando': 'Guardando...',
+        'autoAssign.error': 'No se pudo calcular la propuesta',
+        'autoAssign.errorGuardar': 'No se pudo guardar',
+        'autoAssign.sinFecha': 'Selecciona un día antes de asignar.',
+        'autoAssign.puestosCubiertos': 'puestos cubiertos',
+        'autoAssign.compromisosRespetados': 'compromisos respetados',
+        'autoAssign.puestosSinCubrir': 'puestos sin cubrir',
+        'autoAssign.todoCubierto': 'Todos los mínimos quedan cubiertos',
+        'autoAssign.falta': 'No se han podido cubrir todos los mínimos',
+        'autoAssign.cobertura': 'Cobertura por localización',
+        'autoAssign.colLocalizacion': 'Localización',
+        'autoAssign.colMinimo': 'Mínimo',
+        'autoAssign.colEstado': 'Estado',
+        'autoAssign.colFalta': 'Qué falta',
+        'autoAssign.colEmpleado': 'Empleado',
+        'autoAssign.colPuesto': 'Puesto',
+        'autoAssign.colHorario': 'Horario',
+        'autoAssign.colMotivo': 'Motivo',
+        'autoAssign.colPorQue': 'Por qué no se pudo cubrir',
+        'autoAssign.cumpleMinimo': 'Cumple',
+        'autoAssign.faltaMinimo': 'Por debajo',
+        'autoAssign.cerrada': 'Cerrada',
+        'autoAssign.propuestas': 'Se propone asignar ({{n}})',
+        'autoAssign.sinCubrir': 'Puestos que quedan sin cubrir ({{n}})',
+        'autoAssign.descartados': 'Personas descartadas y por qué ({{n}})',
+        'autoAssign.avisosTitulo': 'Lo que el sistema no sabe',
+        'autoAssign.duplicados': 'Se han detectado {{n}} actividades reflejadas en más de una sección. Se cuentan una sola vez: es el mismo compromiso.',
+        'autoAssign.noToca': 'No se modifica nada de lo que ya está asignado. Si algo no cuadra, se explica en vez de forzar la asignación.',
+        'autoAssign.guardar': 'Guardar ({{n}} asignaciones)',
+        'autoAssign.rechazada': 'No se ha guardado la asignación de {{n}} a {{l}}: {{m}}',
         // Exportación del horario a Excel. El archivo usa el mismo formato que el
         // importador, así que se puede volver a subir sin convertir nada.
         'sched.exportSchedule': 'Exportar Horario',
@@ -6884,6 +6865,38 @@ const I18N = {
         'sched.sectionExtraTasks': 'Extra Tasks',
         'sched.sectionNostalgiaNight': 'Nostalgia Night',
         'sched.overnightHint': 'Night shift: if the end time is earlier than the start time, the shift ends the next day.',
+        'autoAssign.titulo': 'Automatic assignment proposal',
+        'autoAssign.calculando': 'Working out...',
+        'autoAssign.guardando': 'Saving...',
+        'autoAssign.error': 'Could not work out the proposal',
+        'autoAssign.errorGuardar': 'Could not save',
+        'autoAssign.sinFecha': 'Pick a day before assigning.',
+        'autoAssign.puestosCubiertos': 'positions covered',
+        'autoAssign.compromisosRespetados': 'commitments respected',
+        'autoAssign.puestosSinCubrir': 'positions left open',
+        'autoAssign.todoCubierto': 'Every minimum is covered',
+        'autoAssign.falta': 'Not every minimum could be covered',
+        'autoAssign.cobertura': 'Coverage by location',
+        'autoAssign.colLocalizacion': 'Location',
+        'autoAssign.colMinimo': 'Minimum',
+        'autoAssign.colEstado': 'Status',
+        'autoAssign.colFalta': 'What is missing',
+        'autoAssign.colEmpleado': 'Employee',
+        'autoAssign.colPuesto': 'Position',
+        'autoAssign.colHorario': 'Hours',
+        'autoAssign.colMotivo': 'Reason',
+        'autoAssign.colPorQue': 'Why it could not be covered',
+        'autoAssign.cumpleMinimo': 'Met',
+        'autoAssign.faltaMinimo': 'Below',
+        'autoAssign.cerrada': 'Closed',
+        'autoAssign.propuestas': 'Proposed assignments ({{n}})',
+        'autoAssign.sinCubrir': 'Positions left open ({{n}})',
+        'autoAssign.descartados': 'People set aside, and why ({{n}})',
+        'autoAssign.avisosTitulo': 'What the system does not know',
+        'autoAssign.duplicados': '{{n}} activities show up in more than one section. They are counted once: it is the same commitment.',
+        'autoAssign.noToca': 'Nothing already assigned is touched. If something does not add up, it is explained rather than forced.',
+        'autoAssign.guardar': 'Save ({{n}} assignments)',
+        'autoAssign.rechazada': 'Not saved: {{n}} at {{l}} — {{m}}',
         'sched.exportSchedule': 'Export Schedule',
         'sched.exportScheduleHint': 'Downloads the selected day\'s schedule as an Excel file that can be imported again.',
         'sched.exporting': 'Generating Excel...',
