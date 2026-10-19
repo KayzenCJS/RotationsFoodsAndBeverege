@@ -324,7 +324,52 @@
                     -->
                     <div class="schedule-sections" id="scheduleSections" hidden></div>
 
-                    <div class="optimization-results" id="optimizationResults"></div>
+                    <!--
+                        GESTIÓN DE BREAKS
+                    
+                        Antes aquí estaba "Assignment Result", que pintaba una tarjeta
+                        por cada asignación con un resumen del reparto. No era un sitio
+                        donde hacer nada: solo mirarlo. Y escondía lo que sí era una
+                        herramienta, los descansos, que se configuraban con un modal
+                        aparte, desde cada tarjeta de localización.
+                    
+                        Este panel sustituye a aquel: una tabla compacta con la gente
+                        asignada ese día y su descanso. Todo en un sitio, sin tarjetas
+                        grandes.
+                    
+                        No se pierde nada: la información de las asignaciones sigue
+                        estando en el grid de localizaciones de arriba, y los breaks se
+                        siguen guardando en la misma tabla (employee_breaks), con los
+                        mismos endpoints. Lo único que cambia es dónde se ven y desde
+                        dónde se editan.
+                    -->
+                    <div class="break-management" id="breakManagement">
+                        <div class="break-management-header">
+                            <h4>
+                                <i class="fas fa-mug-hot"></i>
+                                <span data-i18n="breaks.panelTitle">Descansos del día</span>
+                            </h4>
+                            <div class="break-management-summary" id="breakSummary"></div>
+                        </div>
+                        <div class="break-management-table-wrap">
+                            <table class="break-management-table" id="breakManagementTable">
+                                <thead>
+                                    <tr>
+                                        <th data-i18n="breaks.colEmployee">Empleado</th>
+                                        <th data-i18n="breaks.colLocation">Locación</th>
+                                        <th data-i18n="breaks.colShift">Turno</th>
+                                        <th data-i18n="breaks.colType">Tipo</th>
+                                        <th data-i18n="breaks.colTime">Horario</th>
+                                        <th data-i18n="breaks.colDuration">Duración</th>
+                                        <th data-i18n="breaks.colCoveredBy">Cubierto por</th>
+                                        <th data-i18n="breaks.colActions">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="breakManagementBody"></tbody>
+                            </table>
+                        </div>
+                        <div id="breakManagementEmpty" class="break-management-empty" hidden></div>
+                    </div>
                 </div>
             </div>
 
@@ -990,6 +1035,70 @@
                         </div>
                         <div class="form-group"></div>
                     </div>
+
+                    <!--
+                        DÍAS LIBRES
+
+                        Son dos cosas distintas y se guardan en sitios distintos:
+
+                          - Los recurrentes (casillas de la semana): los días que
+                            esta persona no trabaja normalmente. Es un patrón, se
+                            repite cada semana. NO hay límite: se pueden marcar
+                            todos los que haga falta, o ninguno.
+
+                          - Las excepciones (fechas sueltas): un día libre
+                            concreto para una fecha concreta. No cambia el patrón
+                            de los demás días de esa semana.
+
+                        El campo days_off del backend ya existía y el motor de
+                        asignación automática ya lo leía; lo que faltaba era una
+                        casilla donde verlo y cambiarlo. Y las excepciones son
+                        una tabla nueva.
+
+                        Las casillas no son un <input type="checkbox"> suelto cada
+                        una: van dentro de un contenedor con la clase
+                        "day-off-weekday", que es lo que lee el JavaScript para
+                        saber cuáles son días libres y cuáles son otra cosa
+                        (como las casillas de capacitaciones, que también son
+                        checkboxes y NO deben confundir).
+                    -->
+                    <div class="form-group" style="width:100%;">
+                        <label data-i18n="employees.dayOffLabel">Días libres</label>
+
+                        <div class="day-off-box">
+                            <p class="imp-note" style="margin:0 0 0.5rem;">
+                                <i class="fas fa-calendar-alt"></i>
+                                <span data-i18n="employees.dayOffRecurrentHint">Días de la semana en los que no trabaja. Se puede marcar cualquiera, o ninguno.</span>
+                            </p>
+                            <div id="empDaysOffWeek" class="day-off-week">
+                                <!-- Las casillas las pinta el JavaScript, con los
+                                     nombres de día en el idioma activo. -->
+                            </div>
+                            <p class="imp-note" style="margin:0.5rem 0 0;">
+                                <i class="fas fa-info-circle"></i>
+                                <span data-i18n="employees.dayOffNoLimitHint">No hay límite de días libres: se marcan los que haga falta.</span>
+                            </p>
+                        </div>
+
+                        <div class="day-off-exceptions" style="margin-top:0.9rem;">
+                            <p class="imp-note" style="margin:0 0 0.4rem;">
+                                <i class="fas fa-calendar-xmark"></i>
+                                <span data-i18n="employees.dayOffExceptionHint">Excepciones: un día libre concreto, para una fecha concreta. No cambia los días de la semana de arriba.</span>
+                            </p>
+                            <div class="day-off-exception-row">
+                                <input type="date" id="empDayOffExceptionDate" />
+                                <input type="text" id="empDayOffExceptionReason"
+                                       data-i18n-placeholder="employees.dayOffExceptionReason"
+                                       placeholder="Motivo (opcional)" />
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="anadirExcepcionDiaLibre()">
+                                    <i class="fas fa-plus"></i> <span data-i18n="employees.dayOffAddException">Añadir</span>
+                                </button>
+                            </div>
+                            <div id="empDayOffExceptions" class="day-off-exception-list"></div>
+                        </div>
+
+                        <div id="empDayOffWarnings" class="day-off-warnings"></div>
+                    </div>
                     <div class="form-group">
                         <label>Habilidades / Capacitaciones</label>
                         <div class="trainings-container">
@@ -1173,6 +1282,19 @@
         consultarEntrenados(), que usa su propia pestaña.
     -->
     <script src="queries.js"></script>
+    <!--
+        Días libres: las casillas de la semana, las excepciones por fecha y el
+        estado de "no disponible" de cada persona.
+
+        Va después de script.js porque usa sus funciones (findEmployee, t, la
+        fecha del horario). Y define las suyas en window, porque los botones del
+        HTML las llaman por nombre.
+
+        Y rompe (en el panel de breaks) va después de script.js porque usa
+        currentAssignments y currentBreaks, que son de ahí.
+    -->
+    <script src="dias-libres-ui.js"></script>
+    <script src="breaks-ui.js"></script>
 
 <!-- ===== IMPORTADOR DE EXCEL ===== -->
 <div class="modal" id="excelImportModal">

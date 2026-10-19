@@ -80,7 +80,7 @@ const firma = (emp, lugar, ini, fin) =>
     const datos = await obtenerDatos(p, dias[0]);
     const wb = construirLibro(datos);
 
-    eq(wb.SheetNames, ['Schedule', 'Import Data', 'Empleados'],
+    eq(wb.SheetNames, ['Schedule', 'Import Data', 'Empleados', 'Days Off'],
        'las hojas son las del archivo de referencia, en ese orden');
 
     const filasSchedule = XLSX.utils.sheet_to_json(wb.Sheets['Schedule'], { header: 1, raw: true, defval: '' });
@@ -228,7 +228,7 @@ const firma = (emp, lugar, ini, fin) =>
     const wbRango = XLSX.read(buf, { type: 'buffer' });
     ok(wbRango.SheetNames.indexOf('Schedule') >= 0, 'el rango incluye la hoja Schedule del primer dia');
     const conSufijo = wbRango.SheetNames.filter(n => / \d{4}-\d{2}-\d{2}$/.test(n));
-    eq(conSufijo.length, 3, 'el segundo dia lleva la fecha en sus 3 hojas: ' + conSufijo.join(', '));
+    eq(conSufijo.length, 4, 'el segundo dia lleva la fecha en sus 4 hojas: ' + conSufijo.join(', '));
 
     console.log('  hojas del rango: ' + wbRango.SheetNames.join(' | '));
 

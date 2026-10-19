@@ -189,6 +189,40 @@ async function cargarEstado(pool, fecha, opcionales = {}) {
         };
     });
 
+    // --- Excepciones de día libre de ESA FECHA ----------------------------
+    //
+    // Los días recurrentes ya venían en la consulta de arriba, y el motor de
+    // reparto (auto-assign.js) ya los tenía en cuenta. Lo que faltaba eran las
+    // EXCEPCIONES: un día libre de una fecha concreta.
+    //
+    // Se cargan solo para la fecha que se está planificando, en una consulta
+    // aparte, y se añaden a la disponibilidad de cada uno. El motor de reparto
+    // los ve igual que un recurrente, así que no hay que tocar su lógica ni
+    // duplicarla.
+    const excepcionesFecha = (await pool.query(
+        `SELECT employee_id, off_date::text AS off_date, reason
+           FROM employee_day_off_exceptions
+          WHERE off_date = $1::date`, [fecha])).rows;
+
+    const excepcionesPor = new Map();
+    for (const ex of excepcionesFecha) {
+        if (!excepcionesPor.has(ex.employee_id)) excepcionesPor.set(ex.employee_id, []);
+        excepcionesPor.get(ex.employee_id).push({
+            off_date: ex.off_date,
+            reason: ex.reason || null
+        });
+    }
+
+    for (const emp of empleados) {
+        const suyas = excepcionesPor.get(emp.id) || [];
+        if (suyas.length) {
+            // Se marca is_day_off para ESA fecha, que es lo que el motor ya
+            // sabe leer, y se guarda el detalle aparte para poder explicarlo.
+            emp.disponibilidad.is_day_off = true;
+            emp.disponibilidad.excepciones = suyas;
+        }
+    }
+
     // --- Zona del parque (PREFERENCIA, no restriccion) ----------------------
     const zonaDe = {};
     for (const z of (await pool.query('SELECT location_id, group_id FROM location_groups')).rows) {

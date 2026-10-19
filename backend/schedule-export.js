@@ -54,6 +54,11 @@
 //     Schedule     -> horario visual por areas y locaciones
 //     Import Data  -> una fila por turno, con horas individuales
 //     Empleados    -> catalogo de empleados (lo usa el matching del importador)
+//     Days Off     -> quien NO puede trabajar ese dia (hoja de apoyo)
+//
+//  La hoja "Days Off" NO es un turno: no lleva horas, el importador no la lee
+//  y nadie de los que aparecen ahi se contabiliza como trabajado. Solo informa
+//  de por que certainas personas no salen en ninguna seccion del horario.
 // ============================================================================
 
 const XLSX = require('xlsx');
@@ -67,8 +72,34 @@ const HOJA_SCHEDULE = 'Schedule';
 const HOJA_IMPORT = 'Import Data';
 const HOJA_EMPLEADOS = 'Empleados';
 
+// Hoja de apoyo: quien NO puede trabajar ese dia. Va al final para que las
+// tres hojas que usa el importador sigan siendo las de siempre, en el mismo
+// orden.
+const HOJA_DIAS_LIBRES = 'Days Off';
+
 const COLS_IMPORT = ['Employee Name', 'Location', 'Work Date', 'Start Time', 'End Time', 'Role', 'Source Section'];
 const COLS_EMPLEADOS = ['Nombre', 'Nacionalidad', 'Edad', 'Rol', 'Grupo'];
+const COLS_DIAS_LIBRES = ['Nombre', 'Rol', 'Grupo', 'Estado', 'Dia libre', 'Fecha', 'Motivo', 'Tipo'];
+
+// ---------------------------------------------------------------------------
+//  Textos de la hoja de dias libres
+// ---------------------------------------------------------------------------
+// El exportador no tiene selector de idioma: las hojas mezclan cabeceras en
+// español ("Empleados") y en inglés ("Import Data") según la que copiaron del
+// archivo de referencia. Por eso los textos que no son un dato van con los
+// dos idiomas en la misma celda, que es lo unico que se puede hacer sin
+// inventar un idioma que el exportador no soporta.
+//
+// "Dia libre" y "Motivo" son datos: se escriben tal cual los da la base
+// (el nombre del dia registrado, o el texto de la excepcion).
+const ESTADO_DIA_LIBRE = 'No disponible - Dia libre / Unavailable - Day Off';
+
+// Como se escribe el TIPO. Las claves son las de dias-libres.js.
+const TIPO_DIA_LIBRE = {
+    recurrente: 'recurrente / recurrent',
+    excepcion: 'excepcion / exception',
+    hoy: 'hoy / today'
+};
 
 // Layout del horario visual. El parser exige Time con Name justo a la derecha,
 // y como mucho dos bloques: columnas 0-2 y 4-6.
@@ -244,8 +275,11 @@ const fusionar = (izq, der) => {
 //   izq: { etiqueta, secciones: [ { nombre, filas: [...] } ] },
 //   der: { etiqueta, secciones: [ { nombre, filas: [...] } ] },
 //   importData: [ { empleado, localizacion, fecha, inicio, fin, rol, seccion } ],
-//   empleados: [ { nombre, nacionalidad, edad, rol, grupo } ]
+//   empleados: [ { nombre, nacionalidad, edad, rol, grupo } ],
+//   diasLibres: [ { nombre, rol, grupo, tipo, diaLibre, fecha, motivo } ]
 // }
+//
+// `diasLibres` es opcional: si no viene, la hoja sale solo con la cabecera.
 
 function construirLibro(datos) {
     const wb = XLSX.utils.book_new();
@@ -328,6 +362,42 @@ function construirLibro(datos) {
     wsEmp['!cols'] = [{ wch: 26 }, { wch: 16 }, { wch: 7 }, { wch: 22 }, { wch: 8 }];
     XLSX.utils.book_append_sheet(wb, wsEmp, HOJA_EMPLEADOS);
 
+    // --- Days Off ----------------------------------------------------------
+    // Quien NO puede trabajar ese dia, para que quien recibe el archivo sepa
+    // por que no aparece en ninguna seccion.
+    //
+    // Aqui NO hay turnos: no se inventa un horario para nadie, no se anade
+    // ninguna fila a las hojas de turnos y no se contabilizan horas. La hoja
+    // no lleva columnas de hora precisamente por eso. El importador no la lee.
+    const listaDias = (datos.diasLibres)
+        || (datos.informe && datos.informe.diasLibres)
+        || [];
+
+    const filasDias = [COLS_DIAS_LIBRES.slice()];
+    for (const d of listaDias) {
+        filasDias.push([
+            d.nombre || '',
+            d.rol || '',
+            d.grupo || '',
+            ESTADO_DIA_LIBRE,
+            // El dia libre registrado: el nombre del dia (recurrente) o la
+            // fecha (excepcion). Se escribe tal cual esta.
+            d.diaLibre || '',
+            d.fecha || datos.fecha || '',
+            // El motivo: el texto de la excepcion si la hay, si no el de
+            // dias-libres.js ("descansa los monday", "día libre", ...).
+            d.motivo || '',
+            TIPO_DIA_LIBRE[d.tipo] || d.tipo || ''
+        ]);
+    }
+    const wsDias = XLSX.utils.aoa_to_sheet(filasDias);
+    wsDias['!cols'] = [
+        { wch: 26 }, { wch: 18 }, { wch: 8 }, { wch: 46 },
+        { wch: 14 }, { wch: 13 }, { wch: 34 }, { wch: 22 }
+    ];
+    if (filasDias.length > 1) wsDias['!autofilter'] = { ref: 'A1:H' + filasDias.length };
+    XLSX.utils.book_append_sheet(wb, wsDias, HOJA_DIAS_LIBRES);
+
     return wb;
 }
 
@@ -349,8 +419,12 @@ module.exports = {
     HOJA_SCHEDULE,
     HOJA_IMPORT,
     HOJA_EMPLEADOS,
+    HOJA_DIAS_LIBRES,
     COLS_IMPORT,
     COLS_EMPLEADOS,
+    COLS_DIAS_LIBRES,
+    ESTADO_DIA_LIBRE,
+    TIPO_DIA_LIBRE,
     IZQ,
     DER,
     filaCabecera,

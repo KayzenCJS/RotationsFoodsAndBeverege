@@ -47,6 +47,10 @@ const getPool = (type) => type === 'retail' ? retail : foods;
 // Ver el modulo para el porque de no borrarlas de la tabla.
 const retiradas = require('./locations-retiradas');
 
+// Dias libres: recurrente (employee_availability.days_off) y excepcion por
+// fecha (employee_day_off_exceptions). Ver backend/dias-libres.js.
+const diasLibres = require('./dias-libres');
+
 const getBuildingTable = (locationId) => {
     const tables = {
         'pixie-kitchen': 'pixie_kitchen_assignments',
@@ -807,6 +811,88 @@ app.get('/api/:type/buildings/:locationId/assignments', async (req, res) => {
     }
 });
 
+// ============================================================================
+//  DÍAS LIBRES: COMPROBACIÓN
+// ============================================================================
+//  ¿Puede este empleado trabajar este día?
+//
+//  Devuelve null si puede, o un objeto con el motivo si no.
+//
+//  Se consulta en el backend y no solo en la interfaz por dos razones:
+//    - Una llamada directa al endpoint (o un importador, o la asignación
+//      automática) no tiene por qué pasar por el formulario.
+//    - La interfaz puede quedarse sin sincronizar; el backend no.
+//
+//  MIRA LAS DOS COSAS QUE SON DISTINTAS
+//  ------------------------------------
+//    - El día libre RECURRENTE: los días de la semana en su ficha.
+//    - La EXCEPCIÓN de esa fecha concreta.
+//
+//  Y no se confunde con otras ausencias: vacaciones, enfermedad o descanso
+//  durante un turno son cosas distintas, y no se tocan aquí.
+//
+//  El mensaje se escribe en español porque es el idioma de la aplicación, y el
+//  frontend lo muestra tal cual. Los dos idiomas los pone el frontend.
+async function comprobarDiaLibre(pool, employeeId, workDate) {
+    if (!employeeId || !workDate) return null;
+
+    const id = Number(employeeId);
+    if (!Number.isInteger(id)) return null;
+
+    // La disponibilidad vive en foods aunque se consulte desde retail: es
+    // donde vive el empleado.
+    const disponibilidad = (await getPool('foods').query(
+        'SELECT is_day_off, days_off FROM employee_availability WHERE employee_id = $1', [id]
+    )).rows[0] || null;
+
+    const motivo = await diasLibres.motivoDiaLibre(pool, disponibilidad, id, workDate);
+    if (!motivo) return null;
+
+    const nombre = (await getPool('foods').query(
+        'SELECT name FROM employees WHERE id = $1', [id])).rows[0];
+    const quien = nombre ? nombre.name : `empleado ${id}`;
+
+    let mensaje;
+    if (motivo.tipo === 'excepcion') {
+        mensaje = `${quien} tiene un día libre excepcional el ${motivo.fecha}`
+            + (motivo.motivo ? ` (${motivo.motivo})` : '')
+            + '. No se puede crear la asignación.';
+    } else if (motivo.tipo === 'hoy') {
+        mensaje = `${quien} está marcado como día libre el ${motivo.fecha}. No se puede crear la asignación.`;
+    } else {
+        mensaje = `${quien} descansa los ${motivo.diaSemana} y el ${workDate} cae en ese día. No se puede crear la asignación.`;
+    }
+
+    return { ...motivo, mensaje, employee_id: id, employee_name: nombre ? nombre.name : null };
+}
+
+// Los endpoints que devuelven los turnos de un día los usan los reportes y el
+// exportador, y necesitan saber también de quién NO se puede trabajar ese día.
+// Se añaden a la respuesta de la lista de asignaciones.
+//
+// Se consulta en foods siempre: el empleado y su disponibilidad viven ahí.
+async function anadirNoDisponibles(pool, fecha, empleados) {
+    const ids = empleados.map(e => Number(e.id)).filter(n => Number.isInteger(n));
+    if (!ids.length) return [];
+
+    const bloqueados = await diasLibres.listadoNoDisponibles(getPool('foods'), ids, fecha);
+
+    return bloqueados.map(b => {
+        const emp = empleados.find(e => Number(e.id) === b.employee_id);
+        return {
+            employee_id: b.employee_id,
+            employee_name: emp ? emp.name : null,
+            role: emp ? emp.role : null,
+            group_id: emp ? emp.group_id : null,
+            tipo: b.tipo,
+            etiqueta: b.etiqueta,
+            fecha: b.fecha,
+            dia_semana: b.diaSemana || null,
+            motivo: b.motivo || null
+        };
+    });
+}
+
 // Create assignment
 app.post('/api/:type/assignments', async (req, res) => {
     try {
@@ -820,6 +906,26 @@ app.post('/api/:type/assignments', async (req, res) => {
         const role = req.body.role ? String(req.body.role).slice(0, 50) : null;
         const notes = req.body.notes ? String(req.body.notes).slice(0, 2000) : null;
         const task_id = req.body.task_id ? Number(req.body.task_id) : null;
+
+        // DÍA LIBRE
+        //
+        // Se comprueba antes que todo lo demás, y para TODOS los tipos de
+        // asignación (también las secciones no geográficas: un día libre es un
+        // día libre, estés donde trabajes ese día).
+        //
+        // Esta es la comprobación que hace que los días libres sean una regla
+        // de verdad y no una etiqueta: sin ella, la interfaz deshabilitaría al
+        // empleado pero cualquier llamada directa al backend lo colaría.
+        const bloqueoDiaLibre = await comprobarDiaLibre(pool, employee_id, work_date);
+        if (bloqueoDiaLibre) {
+            return res.status(400).json({
+                error: 'day_off',
+                message: bloqueoDiaLibre.mensaje,
+                tipo: bloqueoDiaLibre.tipo,
+                dia_semana: bloqueoDiaLibre.diaSemana || null,
+                fecha: work_date
+            });
+        }
 
         // Las secciones no geográficas no son locations: se salta la comprobación
         // de cierre por día, que solo aplica a locations reales.
@@ -912,6 +1018,44 @@ app.put('/api/:type/assignments/:id', async (req, res) => {
         const role = req.body.role ? String(req.body.role).slice(0, 50) : null;
         const notes = req.body.notes ? String(req.body.notes).slice(0, 2000) : null;
         const task_id = req.body.task_id ? Number(req.body.task_id) : null;
+
+        // DÍA LIBRE: igual que al crear. Mover un turno a un día libre es
+        // meter a alguien a trabajar cuando no puede, así que también se
+        // rechaza.
+        //
+        // Si la asignación YA estaba en ese día y lo que se está cambiando es
+        // otra cosa, no se bloquea: el conflicto se informa aparte, en vez de
+        // impedir editar un turno que ya existe. Solo se rechaza cuando se
+        // intenta AÑADIR o MOVER el turno a un día libre.
+        const diaLibreNuevo = await comprobarDiaLibre(pool, employee_id, work_date);
+        if (diaLibreNuevo) {
+            const original = (await pool.query(
+                'SELECT employee_id, work_date::text AS work_date FROM assignments WHERE id = $1',
+                [assignmentId])).rows[0];
+
+            // La fecha viene como texto 'YYYY-MM-DD'. Sin el ::text, PostgreSQL
+            // devuelve un objeto Date y compararlo con la fecha que manda el
+            // formulario nunca saldria igual, con lo que un turno que YA estaba
+            // en el día libre se rechazaria en vez de avisarse.
+            const yaEstaba = original
+                && Number(original.employee_id) === Number(employee_id)
+                && String(original.work_date).slice(0, 10) === String(work_date).slice(0, 10);
+
+            if (!yaEstaba) {
+                return res.status(400).json({
+                    error: 'day_off',
+                    message: diaLibreNuevo.mensaje,
+                    tipo: diaLibreNuevo.tipo,
+                    dia_semana: diaLibreNuevo.diaSemana || null,
+                    fecha: work_date
+                });
+            }
+            // Si ya estaba, se deja pasar pero se avisa, para que quien edita
+            // sepa que hay un choque con el día libre y decida. No se borra
+            // nada por la espalda.
+            console.warn('[assignments] el turno ' + assignmentId + ' sigue en un día libre: '
+                + diaLibreNuevo.etiqueta + '. Se avisa, no se bloquea.');
+        }
 
         // El cierre por día solo aplica a locations reales.
         if (assignment_type === 'LOCATION') {
@@ -1227,6 +1371,193 @@ app.put('/api/:type/employees/:id/training-locations', async (req, res) => {
             [id])).rows.map((r) => r.group_id);
         res.json({ employee_id: id, locations: out, groups: g, discarded_locations: descartadas });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ============================================================================
+//  DÍAS LIBRES: ENDPOINTS
+// ============================================================================
+//
+//  GET  /api/:type/day-off-status?date=YYYY-MM-DD
+//      Quién NO puede trabajar ese día, y qué turnos suyos chocan con ello.
+//      Es lo que pintan el panel de la fecha y el informe.
+//
+//  GET  /api/:type/employees/:id/day-off-exceptions
+//      Las excepciones por fecha de un empleado.
+//
+//  PUT  /api/:type/employees/:id/day-off-exceptions
+//      Guarda la lista completa de excepciones. Los días recurrentes NO van
+//      aquí: viven en employee_availability.days_off y se guardan con el
+//      empleado, en el PUT /employees.
+//
+//  No se ha tocado GET /assignments: su forma no cambia, para no romper a
+//  quien la consume. La información va en su propio endpoint.
+// ============================================================================
+
+// Quién no puede trabajar un día, y qué turnos existentes chocan con eso.
+//
+// Los dos casos se devuelven por separado y con nombres distintos:
+//   - no_disponibles: el día libre en sí.
+//   - asignaciones_en_conflicto: turnos YA guardados que caen en ese día.
+//
+// Un turno en conflicto NO se borra: se informa, para que el administrador
+// decida. Borrarlo por la espalda sería perder un horario que alguien hizo a
+// propósito.
+app.get('/api/:type/day-off-status', async (req, res) => {
+    try {
+        const pool = getPool(req.params.type);
+        const fecha = req.query.date;
+        if (!fecha || !/^\d{4}-\d{2}-\d{2}/.test(String(fecha))) {
+            return res.status(400).json({ error: 'fecha_invalida' });
+        }
+
+        const empleados = (await pool.query(
+            'SELECT id, name, role, group_id FROM employees ORDER BY name')).rows;
+
+        const noDisponibles = await anadirNoDisponibles(pool, fecha, empleados);
+
+        // Turnos ya guardados ese día, de quien tiene un día libre.
+        const enConflicto = [];
+        if (noDisponibles.length) {
+            const ids = noDisponibles.map(n => n.employee_id);
+            const turnos = (await pool.query(
+                `SELECT a.id, a.employee_id, a.location_id, a.start_time::text AS start_time,
+                        a.end_time::text AS end_time, a.assignment_type, a.category,
+                        e.name AS employee_name, l.name AS location_name
+                   FROM assignments a
+                   JOIN employees e ON e.id = a.employee_id
+                   LEFT JOIN locations l ON l.id = a.location_id
+                  WHERE a.work_date = $1 AND a.employee_id = ANY($2::int[])
+                  ORDER BY e.name, a.start_time`, [fecha, ids])).rows;
+
+            for (const t of turnos) {
+                const bloqueo = noDisponibles.find(n => n.employee_id === t.employee_id);
+                enConflicto.push({
+                    assignment_id: t.id,
+                    employee_id: t.employee_id,
+                    employee_name: t.employee_name,
+                    location_name: t.location_name,
+                    start_time: t.start_time,
+                    end_time: t.end_time,
+                    assignment_type: t.assignment_type,
+                    category: t.category,
+                    motivo: bloqueo ? bloqueo.etiqueta : null,
+                    motivo_tipo: bloqueo ? bloqueo.tipo : null,
+                    dia_semana: bloqueo ? bloqueo.dia_semana : null
+                });
+            }
+        }
+
+        res.json({
+            fecha: String(fecha).slice(0, 10),
+            dia_semana: diasLibres.diaSemana(fecha),
+            no_disponibles: noDisponibles,
+            asignaciones_en_conflicto: enConflicto
+        });
+    } catch (err) {
+        console.error('Error en day-off-status:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Las excepciones por fecha de un empleado.
+app.get('/api/:type/employees/:id/day-off-exceptions', async (req, res) => {
+    try {
+        const pool = getPool('foods');
+        const id = Number(req.params.id);
+        const filas = (await pool.query(
+            `SELECT id, off_date::text AS off_date, reason, created_at
+               FROM employee_day_off_exceptions
+              WHERE employee_id = $1
+              ORDER BY off_date`, [id])).rows;
+        res.json({ employee_id: id, excepciones: filas });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Guarda la lista completa de excepciones de un empleado.
+//
+// Es un REEMPLAZO, como el de las locaciones entrenadas: se manda la lista
+// entera y se guarda esa. Asi el frontend no tiene que saber diferenciarse.
+//
+// Un turno que ya exista en una de esas fechas NO se borra: se devuelve en
+// `asignaciones_en_conflicto` para que el frontend lo diga y el administrador
+// decida.
+app.put('/api/:type/employees/:id/day-off-exceptions', async (req, res) => {
+    try {
+        const pool = getPool('foods');
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'employee_id_invalido' });
+
+        const existe = (await pool.query('SELECT 1 FROM employees WHERE id = $1', [id])).rows.length;
+        if (!existe) return res.status(404).json({ error: 'employee_not_found' });
+
+        const crudas = Array.isArray(req.body.exceptions) ? req.body.exceptions : [];
+
+        // Se limpian antes de guardar: fecha válida, sin repetir, con motivo
+        // recortado. Una fecha que no es fecha se descarta en vez de reventar.
+        const validas = [];
+        const vistas = new Set();
+        for (const e of crudas) {
+            const fecha = String(e && e.off_date ? e.off_date : '').slice(0, 10);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) continue;
+            if (vistas.has(fecha)) continue;
+            vistas.add(fecha);
+            validas.push({
+                fecha,
+                motivo: e && e.reason ? String(e.reason).slice(0, 300) : null
+            });
+        }
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            await client.query('DELETE FROM employee_day_off_exceptions WHERE employee_id = $1', [id]);
+            for (const v of validas) {
+                await client.query(
+                    `INSERT INTO employee_day_off_exceptions (employee_id, off_date, reason)
+                     VALUES ($1, $2::date, $3)`, [id, v.fecha, v.motivo]);
+            }
+            await client.query('COMMIT');
+        } catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        } finally {
+            client.release();
+        }
+
+        // Los turnos que ya había en esas fechas. No se tocan: se informan.
+        const conflictos = [];
+        if (validas.length) {
+            const fechas = validas.map(v => v.fecha);
+            const turnos = (await pool.query(
+                `SELECT a.id, a.work_date::text AS work_date, a.start_time::text AS start_time,
+                        a.end_time::text AS end_time, e.name AS employee_name, l.name AS location_name
+                   FROM assignments a
+                   JOIN employees e ON e.id = a.employee_id
+                   LEFT JOIN locations l ON l.id = a.location_id
+                  WHERE a.employee_id = $1 AND a.work_date = ANY($2::date[])
+                  ORDER BY a.work_date, a.start_time`, [id, fechas])).rows;
+            conflictos.push(...turnos.map(t => ({
+                assignment_id: t.id,
+                work_date: t.work_date,
+                start_time: t.start_time,
+                end_time: t.end_time,
+                employee_name: t.employee_name,
+                location_name: t.location_name
+            })));
+        }
+
+        res.json({
+            employee_id: id,
+            guardadas: validas.length,
+            descartadas: crudas.length - validas.length,
+            asignaciones_en_conflicto: conflictos
+        });
+    } catch (err) {
+        console.error('Error guardando excepciones de dia libre:', err);
         res.status(500).json({ error: err.message });
     }
 });

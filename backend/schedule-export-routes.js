@@ -172,6 +172,14 @@ async function construirLibroVariosDias(pool, fechas) {
         XLSX.utils.book_append_sheet(wb, dia.Sheets['Schedule'], nombre('Schedule'));
         XLSX.utils.book_append_sheet(wb, dia.Sheets['Import Data'], nombre('Import Data'));
         XLSX.utils.book_append_sheet(wb, dia.Sheets['Empleados'], nombre('Empleados'));
+
+        // La hoja de días libres también sale en el export de varios días.
+        // Si no se copiara, quien exportara un rango vería los turnos pero no
+        // a la gente que no puede trabajar, que es justo la información que
+        // hace falta para entender el hueco.
+        if (dia.Sheets['Days Off']) {
+            XLSX.utils.book_append_sheet(wb, dia.Sheets['Days Off'], nombre('Days Off'));
+        }
     }
     return wb;
 }

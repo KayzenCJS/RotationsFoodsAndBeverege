@@ -394,6 +394,11 @@ async function switchType(type) {
             currentLocationDisables = disables.filter(d => !d.enabled_at);
             try {
                 currentBreaks = await fetchBreaks(currentDate);
+                // El estado de días libres del día: quién no puede trabajar y
+                // qué turnos chocan con ello. El panel de breaks lo usa para
+                // marcar esas filas, y el estado de cada empleado lo usa para
+                // decir NO DISPONIBLE en vez de DISPONIBLE.
+                await cargarNoDisponiblesDelDia(currentDate);
             } catch (error) {
                 console.error('Error loading breaks:', error);
                 currentBreaks = [];
@@ -407,7 +412,7 @@ async function switchType(type) {
         renderLocationCards();
         renderTasks();
         renderLocationsGrid(); // Render after employees are loaded
-        displayOptimizationResults(currentAssignments);
+        renderBreakManagement();
         updateStats();
 
         showNotification(`Datos de ${type === 'foods' ? 'Foods' : 'Retail'} cargados`, 'success');
@@ -498,6 +503,11 @@ async function loadInitialData() {
             currentLocationDisables = disables.filter(d => !d.enabled_at);
             try {
                 currentBreaks = await fetchBreaks(currentDate);
+                // El estado de días libres del día: quién no puede trabajar y
+                // qué turnos chocan con ello. El panel de breaks lo usa para
+                // marcar esas filas, y el estado de cada empleado lo usa para
+                // decir NO DISPONIBLE en vez de DISPONIBLE.
+                await cargarNoDisponiblesDelDia(currentDate);
             } catch (error) {
                 console.error('Error loading breaks:', error);
                 currentBreaks = [];
@@ -511,7 +521,7 @@ async function loadInitialData() {
         renderLocationCards();
         renderTasks();
         renderLocationsGrid(); // Render after employees are loaded
-        displayOptimizationResults(currentAssignments);
+        renderBreakManagement();
         updateStats();
         showNotification(t('notify.apiLoaded'), 'success');
     } catch (error) {
@@ -703,19 +713,55 @@ function getSkillName(skill) {
     return key ? t(key) : skill;
 }
 
-function getEmployeeStatus(emp) {
-    if (!emp.availability) return { text: t('status.available'), class: 'status-available' };
-    if (emp.availability.isOnBreak) return { text: t('status.break'), class: 'status-break' };
-    if (emp.availability.isOnTraining) return { text: t('status.training'), class: 'status-training' };
-    if (emp.availability.isDayOff) return { text: t('status.dayoff'), class: 'status-dayoff' };
-    if (emp.availability.isHoliday) return { text: t('status.holiday'), class: 'status-holiday' };
+// El estado de un empleado.
+//
+// El día libre se mira de dos formas:
+//
+//   - El flag is_day_off, que es la marca de "hoy está libre".
+//   - Los días recurrentes de su ficha, comparados con el día de la semana
+//     de la fecha que se está mirando.
+//
+// La segunda es la que hace que el día libre sea una regla de verdad: si
+// alguien descansa los martes, el martes aparece como NO DISPONIBLE aunque
+// no tenga el flag puesto.
+//
+// La fecha es opcional: si no se pasa, solo cuenta el flag, que es lo que
+// necesitan las pantallas que no miran un día concreto.
+function getEmployeeStatus(emp, fechaISO) {
+    if (!emp) return { text: t('status.available'), class: 'status-available' };
+
+    const disponibilidad = emp.availability || {};
+
+    if (disponibilidad.isOnBreak) return { text: t('status.break'), class: 'status-break' };
+    if (disponibilidad.isOnTraining) return { text: t('status.training'), class: 'status-training' };
+    if (disponibilidad.isHoliday) return { text: t('status.holiday'), class: 'status-holiday' };
+
+    // El día libre va después de los demás: si alguien está de vacaciones y
+    // además tiene el día libre, lo que manda es que está de vacaciones.
+    if (motivoDiaLibreFecha(emp, fechaISO)) {
+        return { text: t('status.unavailableDayOff'), class: 'status-dayoff' };
+    }
+    if (disponibilidad.isDayOff) {
+        return { text: t('status.unavailableDayOff'), class: 'status-dayoff' };
+    }
+
     return { text: t('status.available'), class: 'status-available' };
 }
 
-function isEmployeeAvailable(emp) {
-    if (!emp.availability) return true;
-    return !emp.availability.isOnBreak && !emp.availability.isOnTraining &&
-           !emp.availability.isDayOff && !emp.availability.isHoliday;
+function isEmployeeAvailable(emp, fechaISO) {
+    if (!emp) return true;
+
+    const disponibilidad = emp.availability || {};
+    if (disponibilidad.isOnBreak || disponibilidad.isOnTraining ||
+        disponibilidad.isHoliday) {
+        return false;
+    }
+    if (disponibilidad.isDayOff) return false;
+
+    // Los días recurrentes, si se está mirando un día concreto.
+    if (fechaISO && motivoDiaLibreFecha(emp, fechaISO)) return false;
+
+    return true;
 }
 
 function getPriorityName(p) {
@@ -759,7 +805,7 @@ function getFilteredEmployees() {
     const typeFilter = document.getElementById('employeeTypeFilter')?.value || '';
 
     return employees.filter(emp => {
-        const status = getEmployeeStatus(emp);
+        const status = getEmployeeStatus(emp, fechaDelHorarioGlobal());
         const statusMap = { 'status-available': 'available', 'status-break': 'break', 'status-training': 'training', 'status-dayoff': 'dayoff', 'status-holiday': 'holiday' };
         const statusValue = statusMap[status.class] || 'available';
 
@@ -802,6 +848,17 @@ function setEmployeeSection(section) {
 // Busca un empleado por id sin que importe si el id llega como texto o numero.
 // Los botones generan el id, pero un id de otra forma (un enlace, un
 // atajo) dejaba la tarjeta sin hacer nada.
+// La fecha del horario que se está mirando.
+//
+// Se usa para saber si alguien tiene día libre ese día: el estado de un
+// empleado depende del día, no solo de su ficha. Se lee del campo de fecha
+// del horario, que es la que el usuario está viendo.
+function fechaDelHorarioGlobal() {
+    const campo = document.getElementById('workDate');
+    return campo && campo.value ? campo.value : getCurrentDateInTimezone();
+}
+
+
 function findEmployee(id) {
     const n = Number(id);
     return employees.find(e => e.id === n) || employees.find(e => String(e.id) === String(id));
@@ -811,7 +868,7 @@ function openEmployeeDetail(id) {
     const emp = findEmployee(id);
     if (!emp) { showNotification(t('notify.employeeNotFound') || 'Empleado no encontrado', 'error'); return; }
 
-    const status = getEmployeeStatus(emp);
+    const status = getEmployeeStatus(emp, fechaDelHorarioGlobal());
     const hireDate = emp.hire_date ? new Date(emp.hire_date).toLocaleDateString('es-ES') : 'N/A';
     const skills = (emp.trainings || []).map(s => `<span class="skill-tag">${getSkillName(s)}</span>`).join('') || '<span class="skill-tag">Sin habilidades</span>';
     const certifications = (emp.trainings || []).filter(s => /cert|dunkin|alcohol|food-safety/i.test(s)).map(s => `<span class="skill-tag certification-tag">${getSkillName(s)}</span>`).join('') || '<span class="text-muted">Sin certificaciones</span>';
@@ -888,7 +945,7 @@ function renderEmployees() {
 
     let html = '';
     filtered.forEach(emp => {
-        const status = getEmployeeStatus(emp);
+        const status = getEmployeeStatus(emp, fechaDelHorarioGlobal());
         const hireDate = emp.hire_date ? new Date(emp.hire_date).toLocaleDateString('es-ES') : 'N/A';
         // El id viaja en data-emp-id, no dentro del onclick: asi el boton
         // siempre apunta a SU fila y no a un id pegado en el HTML.
@@ -1285,46 +1342,6 @@ function updateLocationAssignmentsForAll() {
     });
 }
 
-// ============================================
-// RENDER: OPTIMIZATION RESULTS
-// ============================================
-function displayOptimizationResults(assignments) {
-    const container = document.getElementById('optimizationResults');
-    if (!container) return;
-
-    if (!assignments || assignments.length === 0) {
-        container.innerHTML = '<p style="text-align:center;color:var(--text-tertiary);">No hay asignaciones. Usa "Asignar Automáticamente" o asigna manualmente.</p>';
-        return;
-    }
-
-    let html = `
-        <div class="results-header">
-            <h4>${t('assignments.results')}</h4>
-            <div class="efficiency-score">${t('assignments.score', { assigned: assignments.length, total: locations.length })}</div>
-        </div>
-    `;
-
-    assignments.forEach(a => {
-        const emp = employees.find(e => e.id === a.employeeId);
-        const status = emp ? getEmployeeStatus(emp) : { text: 'N/A', class: 'status-unknown' };
-        html += `
-            <div class="assignment-item">
-                <div class="assignment-header">
-                    <span class="assigned-ride">${a.locationName}</span>
-                    <span class="assigned-employee">${a.employeeName || 'Sin asignar'}</span>
-                    <span class="assigned-group">Grupo ${a.group || 'N/A'}</span>
-                </div>
-                <div class="assignment-status">
-                    <span class="status-indicator ${status.class}">${status.text}</span>
-                    <div style="margin-top:0.5rem;">${getBreakDisplayForAssignment(a.id)}</div>
-                </div>
-            </div>
-        `;
-    });
-
-    container.innerHTML = html;
-}
-
 
 function filterInspectionMap() {
     renderInspectionsMap();
@@ -1485,6 +1502,9 @@ function openEmployeeModal() {
     if (g) g.value = ' ';
     applyAdminTrainingFilter();
     renderEmployeeTrainingFields(null);
+    // Un empleado nuevo no tiene días libres: se empieza en blanco, sin el
+    // ["sunday"] de fábrica que antes salía solo.
+    cargarDiasLibreEmpleado(null);
 }
 
 function closeEmployeeModal() {
@@ -1562,6 +1582,11 @@ function editEmployee(id) {
     // Locations entrenadas + grupos adicionales (se carga despues de mostrar
     // el modal para no retrasarlo).
     renderEmployeeTrainingFields(emp.id);
+
+    // Días libres: los recurrentes vienen en la ficha, las excepciones hay que
+    // pedirlas. Se cargan después de mostrar el modal, igual que las
+    // localizaciones, para no retrasar la apertura.
+    cargarDiasLibreEmpleado(emp.id);
 }
 
 async function handleDeleteEmployee(id) {
@@ -1573,7 +1598,7 @@ async function handleDeleteEmployee(id) {
         renderEmployees();
         updateLocationAssignmentsForAll(); // Optimized: Update only assignments
         populateEmployeeSelects();
-        displayOptimizationResults(currentAssignments);
+        renderBreakManagement();
         showNotification(t('notify.employeeDeleted'), 'success');
     } catch (error) {
         console.error('Error deleting employee:', error);
@@ -1616,14 +1641,31 @@ document.getElementById('employeeForm').addEventListener('submit', async functio
         .filter(cb => cb.checked)
         .map(cb => cb.value);
 
+    // DÍAS LIBRES: los que se hayan marcado en la ficha, no una lista fija.
+    //
+    // Antes esto ponía days_off: ['sunday'] siempre. Al EDITAR un empleado
+    // eso pisaba lo que tuviera: marcabas el martes, guardabas, y volvía a
+    // domingo. Ahora se manda lo que hay marcado, y si no hay ninguna casilla
+    // marcada se manda la lista vacía, que es un estado válido ("no tiene días
+    // libres recurrentes").
+    const diasLibre = diasLibreSeleccionados();
+
+    // Los flags que el formulario NO tiene (descanso, formación, festivo y el
+    // horario) se conservan al editar. Antes se ponían todos a false, así que
+    // guardar la ficha de alguien le borraba el estado de "descansando" o de
+    // "libre hoy" sin que se hubiera tocado nada de eso. Al crear, se dejaban
+    // en sus valores por defecto.
+    const empActual = editandoId ? findEmployee(editandoId) : null;
+    const dispActual = (empActual && empActual.availability) || {};
+
     const availability = {
-        is_on_break: false,
-        is_on_training: false,
-        is_day_off: false,
-        is_holiday: false,
-        schedule_start_time: '09:00',
-        schedule_end_time: '18:00',
-        days_off: ['sunday'],
+        is_on_break: dispActual.isOnBreak === true,
+        is_on_training: dispActual.isOnTraining === true,
+        is_day_off: dispActual.isDayOff === true,
+        is_holiday: dispActual.isHoliday === true,
+        schedule_start_time: (dispActual.schedule && dispActual.schedule.startTime) || '09:00',
+        schedule_end_time: (dispActual.schedule && dispActual.schedule.endTime) || '18:00',
+        days_off: diasLibre,
         holidays: []
     };
 
@@ -1653,6 +1695,10 @@ document.getElementById('employeeForm').addEventListener('submit', async functio
             }
             showNotification(t('notify.employeeUpdated'), 'success');
             await saveEmployeeTrainingFields(editandoId);
+            // Las excepciones de día libre, en su propio endpoint. Si al
+            // guardar hay turnos que caen en un día que ahora es libre, se
+            // avisa DENTRO del modal: el turno no se borra, se decide a mano.
+            await guardarDiasLibreEmpleado(editandoId);
             currentEditId = null;
         } else {
             const newEmp = await createEmployee(payload);
@@ -1674,6 +1720,9 @@ document.getElementById('employeeForm').addEventListener('submit', async functio
             };
             employees.push(transformedEmp);
             await saveEmployeeTrainingFields(newEmp.id);
+            // Las excepciones de día libre van en su propio endpoint: son una
+            // tabla aparte de la disponibilidad del empleado.
+            await guardarDiasLibreEmpleado(newEmp.id);
             showNotification(t('notify.employeeSaved'), 'success');
         }
 
@@ -1705,7 +1754,7 @@ function toggleEmployeeStatus(id) {
             </div>
             <div style="padding:1.5rem;">
                 <div style="margin-bottom:1rem;">
-                    <label>Actual: <strong>${getEmployeeStatus(emp).text}</strong></label>
+                    <label>Actual: <strong>${getEmployeeStatus(emp, fechaDelHorarioGlobal()).text}</strong></label>
                 </div>
                 <div style="margin-bottom:1rem;">
                     <label>Nuevo Estado:</label>
@@ -1951,7 +2000,13 @@ function assignEmployee(locationId) {
     }
 
     // Get all available employees (not filtering by role anymore)
-    const available = employees.filter(emp => isEmployeeAvailable(emp));
+    // Get all employees (not filtering by role anymore).
+    //
+    // NO se filtran los que no están disponibles: salen todos, marcados. Quien
+    // tiene el día libre ese día tiene que verse como NO DISPONIBLE, no
+    // desaparecer de la lista. Si se escondieran, no se podría ni ver por qué
+    // ni avisar a quien lo intentara.
+    const available = employees;
 
     const assigned = currentAssignments.filter(a => a.locationId === locationId);
     const assignedIds = assigned.map(a => a.employeeId);
@@ -1989,12 +2044,7 @@ function assignEmployee(locationId) {
                 <label style="display:block;margin-bottom:0.5rem;font-weight:500;">Agregar empleado:</label>
                 <input type="text" id="assignEmpSearch" placeholder="Buscar empleado por nombre..." style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-soft);margin-bottom:0.5rem;" />
                 <div id="assignEmpList" style="max-height:200px;overflow-y:auto;border:1px solid var(--border-soft);border-radius:8px;padding:0.5rem;">
-                    ${available.filter(e => !assignedIds.includes(e.id)).map(e => `
-                        <div class="employee-option" data-employee-id="${e.id}" onclick="selectEmployee(${e.id})" style="padding:0.5rem;cursor:pointer;border-bottom:1px solid var(--border-soft);">
-                            <div style="font-weight:500;">${e.name}</div>
-                            <div style="font-size:0.875rem;color:var(--text-tertiary);">${getRoleName(e.role)} - Grupo ${e.group}</div>
-                        </div>
-                    `).join('')}
+                    ${available.filter(e => !assignedIds.includes(e.id)).map(e => opcionEmpleadoParaAsignar(e)).join('')}
                 </div>
                 <input type="hidden" id="assignEmpSelect" value="" />
                 
@@ -2035,19 +2085,50 @@ function assignEmployee(locationId) {
         if (filtered.length === 0) {
             empList.innerHTML = '<div style="padding:0.5rem;color:var(--text-tertiary);text-align:center;">No se encontraron empleados.</div>';
         } else {
-            empList.innerHTML = filtered.map(e => `
-                <div class="employee-option" data-employee-id="${e.id}" onclick="selectEmployee(${e.id})" style="padding:0.5rem;cursor:pointer;border-bottom:1px solid var(--border-soft);">
-                    <div style="font-weight:500;">${e.name}</div>
-                    <div style="font-size:0.875rem;color:var(--text-tertiary);">${getRoleName(e.role)} - Grupo ${e.group}</div>
-                </div>
-            `).join('');
+            empList.innerHTML = filtered.map(e => opcionEmpleadoParaAsignar(e)).join('');
         }
     });
+}
+
+// Una opción del selector de personal.
+//
+// Si la persona no puede trabajar ese día, se muestra con su distintivo de
+// NO DISPONIBLE y sin poder elegirla. Se muestra en vez de esconderse por
+// dos razones: para que se vea POR QUÉ no puede, y para que quien lo intente
+// reciba un aviso en vez de un error al final.
+function opcionEmpleadoParaAsignar(emp) {
+    const noPuede = !isEmployeeAvailable(emp, fechaDelHorarioGlobal());
+    const estado = getEmployeeStatus(emp, fechaDelHorarioGlobal());
+    return `
+        <div class="employee-option${noPuede ? ' employee-option-bloqueado' : ''}"
+             data-employee-id="${emp.id}" onclick="selectEmployee(${emp.id})"
+             style="padding:0.5rem;cursor:${noPuede ? 'not-allowed' : 'pointer'};
+                    border-bottom:1px solid var(--border-soft);${noPuede ? 'opacity:.6;' : ''}">
+            <div style="font-weight:500;">
+                ${emp.name}
+                ${noPuede ? `<span class="status-indicator ${estado.class}" style="margin-left:.4rem;">${esc(estado.text)}</span>` : ''}
+            </div>
+            <div style="font-size:0.875rem;color:var(--text-tertiary);">${getRoleName(emp.role)} - Grupo ${emp.group}</div>
+        </div>`;
 }
 
 function selectEmployee(employeeId) {
     const emp = employees.find(e => e.id === employeeId);
     if (!emp) return;
+
+    // Si no puede trabajar ese día, se avisa y no se selecciona. El backend
+    // también lo rechaza, pero avisar aquí evita que el error salga al final,
+    // después de haber rellenado el formulario entero.
+    if (!isEmployeeAvailable(emp, fechaDelHorarioGlobal())) {
+        const estado = getEmployeeStatus(emp, fechaDelHorarioGlobal());
+        const motivo = motivoDiaLibreFecha(emp, fechaDelHorarioGlobal());
+        showNotification(
+            motivo && motivo.tipo === 'recurrente'
+                ? t('employees.dayOffCannotAssign', { nombre: emp.name, dia: t('employees.days.' + motivo.diaSemana) })
+                : t('employees.dayOffCannotAssignGeneric', { nombre: emp.name, estado: estado.text }),
+            'error');
+        return;
+    }
 
     // Update hidden input
     document.getElementById('assignEmpSelect').value = employeeId;
@@ -2085,7 +2166,7 @@ function assignEmployeeToCategory(categoryKey) {
     const name = currentLang === 'en' ? (cat.name_en || cat.name_es) : cat.name_es;
     const assigned = currentAssignments.filter(a => a.category === categoryKey);
     const assignedIds = assigned.map(a => a.employeeId);
-    const available = employees.filter(emp => isEmployeeAvailable(emp));
+    const available = employees.filter(emp => isEmployeeAvailable(emp, fechaDelHorarioGlobal()));
 
     if (available.length === 0 && assigned.length === 0) {
         showNotification(t('notify.noEmployeesAvailable'), 'error');
@@ -2437,7 +2518,7 @@ async function confirmAssignment(locationId) {
         });
         document.querySelector('.modal').remove();
         updateLocationAssignments(loc.id); // Update only this location
-        displayOptimizationResults(currentAssignments);
+        renderBreakManagement();
         showNotification(`${emp.name} asignado a ${loc.name}`, 'success');
     } catch (error) {
         console.error('Error creating assignment:', error);
@@ -2483,7 +2564,7 @@ async function clearAssignmentsForDate() {
         });
 
         updateLocationAssignmentsForAll();
-        displayOptimizationResults(currentAssignments);
+        renderBreakManagement();
         showNotification(t('notify.dayDeleted'), 'success');
     } catch (error) {
         console.error('Error clearing assignments:', error);
@@ -2500,7 +2581,7 @@ async function removeAssignment(locationId, employeeId) {
         }
         currentAssignments = currentAssignments.filter(a => !(a.locationId === locationId && a.employeeId === employeeId));
         updateLocationAssignments(locationId); // Update only this location
-        displayOptimizationResults(currentAssignments);
+        renderBreakManagement();
         showNotification(t('notify.assignmentDeleted'), 'success');
     } catch (error) {
         console.error('Error deleting assignment:', error);
@@ -2743,7 +2824,7 @@ function processQueryOriginal() {
             assignments.forEach(a => {
                 const emp = employees.find(e => e.id === a.employeeId);
                 if (!emp) return;
-                const status = getEmployeeStatus(emp);
+                const status = getEmployeeStatus(emp, fechaDelHorarioGlobal());
                 html += `
                     <div class="query-result-card">
                         <strong>${emp.name}</strong> - ${getRoleName(a.employeeRole || emp.role)} - ${t('common.group')} ${emp.group || 'N/A'}<br>
@@ -2770,7 +2851,7 @@ function processQueryOriginal() {
                     <strong>${emp.name}</strong><br>
                     Rol: ${getRoleName(emp.role)}<br>
                     ${t('common.group')}: ${emp.group || 'N/A'}<br>
-                    ${t('common.status')}: ${getEmployeeStatus(emp).text}<br>
+                    ${t('common.status')}: ${getEmployeeStatus(emp, fechaDelHorarioGlobal()).text}<br>
                     ${assignment ? `${t('common.location')}: ${assignment.locationName}<br>${t('assignments.schedule')}: ${assignment.startTime || 'N/A'} - ${assignment.endTime || 'N/A'}<br>${t('assignments.break')}: ${findBreakInfoForAssignment(assignment.id)}` : `${t('assignments.notAssignedDate')}`}
                 </div>
             `;
@@ -2785,7 +2866,7 @@ function processQueryOriginal() {
         let html = `<h4>${t('queries.resultsByRole')}</h4>`;
         roleMatched.forEach(emp => {
             const assignment = currentAssignments.find(a => a.employeeId === emp.id);
-            const status = getEmployeeStatus(emp);
+            const status = getEmployeeStatus(emp, fechaDelHorarioGlobal());
             html += `
                 <div style="padding:0.75rem;background:var(--bg-section);border:1px solid var(--border-soft);border-radius:8px;margin-bottom:0.5rem;">
                     <strong>${emp.name}</strong> - ${getRoleName(emp.role)}<br>
@@ -3898,7 +3979,7 @@ async function openBreakConfigModal(assignmentId, locationId, employeeId, employ
     // Setup search functionality for covered by employee
     const searchInput = document.getElementById('coveredBySearch');
     const empList = document.getElementById('coveredByList');
-    const availableEmployees = employees.filter(e => e.id !== employeeId && isEmployeeAvailable(e));
+    const availableEmployees = employees.filter(e => e.id !== employeeId && isEmployeeAvailable(e, fechaDelHorarioGlobal()));
 
     searchInput.addEventListener('input', (e) => {
         const searchTerm = e.target.value.toLowerCase();
@@ -4071,6 +4152,11 @@ async function loadAssignmentsForDate(date) {
 
         try {
             currentBreaks = await fetchBreaks(normalizedDate);
+            // El estado de días libres del día: quién no puede trabajar y
+            // qué turnos chocan con ello. El panel de breaks lo usa para
+            // marcar esas filas, y el estado de cada empleado lo usa para
+            // decir NO DISPONIBLE en vez de DISPONIBLE.
+            await cargarNoDisponiblesDelDia(normalizedDate);
         } catch (error) {
             console.error('Error loading breaks:', error);
             currentBreaks = [];
@@ -4082,7 +4168,7 @@ async function loadAssignmentsForDate(date) {
         // Las secciones (OPS, Extra Hours, Support, Extra Tasks) se pintan
         // siempre junto a las locations: ambas leen de currentAssignments.
         renderScheduleSections();
-        displayOptimizationResults(currentAssignments);
+        renderBreakManagement();
     } catch (error) {
         console.error('Error loading assignments for date:', error);
     }
@@ -6204,6 +6290,57 @@ const I18N = {
         'reports.noResults': 'No employee matches.',
         'reports.error': 'Could not load the report.',
         'reports.export': 'Export CSV',
+        'status.unavailableDayOff': 'No disponible — Día libre',
+        'employees.dayOffLabel': 'Días libres',
+        'employees.dayOffRecurrentHint': 'Días de la semana en los que no trabaja. Se puede marcar cualquiera, o ninguno.',
+        'employees.dayOffNoLimitHint': 'No hay límite de días libres: se marcan los que haga falta.',
+        'employees.dayOffStatus': 'No disponible — Día libre',
+        'employees.dayOffExceptionHint': 'Excepciones: un día libre concreto, para una fecha concreta. No cambia los días de la semana de arriba.',
+        'employees.dayOffExceptionReason': 'Motivo (opcional)',
+        'employees.dayOffAddException': 'Añadir',
+        'employees.dayOffNoExceptions': 'Sin excepciones registradas',
+        'employees.dayOffRemoveException': 'Quitar esta excepción',
+        'employees.dayOffExceptionBadDate': 'Elige una fecha válida para la excepción.',
+        'employees.dayOffExceptionDuplicate': 'Ya hay una excepción para esa fecha.',
+        'employees.dayOffConflictTitle': 'Hay turnos en un día ahora libre',
+        'employees.dayOffConflictHint': 'Estos turnos ya existían. No se han borrado: decide tú si se quedan o se quitan.',
+        'employees.dayOffUnknownLocation': 'sin ubicación',
+        'employees.days.monday': 'Lunes',
+        'employees.days.tuesday': 'Martes',
+        'employees.days.wednesday': 'Miércoles',
+        'employees.days.thursday': 'Jueves',
+        'employees.days.friday': 'Viernes',
+        'employees.days.saturday': 'Sábado',
+        'employees.days.sunday': 'Domingo',
+        'breaks.panelTitle': 'Descansos del día',
+        'breaks.colEmployee': 'Empleado',
+        'breaks.colLocation': 'Locación',
+        'breaks.colShift': 'Turno',
+        'breaks.colType': 'Tipo',
+        'breaks.colTime': 'Horario',
+        'breaks.colDuration': 'Duración',
+        'breaks.colCoveredBy': 'Cubierto por',
+        'breaks.colActions': 'Acciones',
+        'breaks.selfBreakLabel': 'Self Break',
+        'breaks.coveredByLabel': 'Break Relief',
+        'breaks.noBreak': 'Sin descanso',
+        'breaks.noAssignments': 'No hay nadie asignado para esta fecha.',
+        'breaks.unknownLocation': 'Sin ubicación',
+        'breaks.summaryWith': 'Con descanso',
+        'breaks.summaryWithout': 'Sin descanso',
+        'breaks.summaryCovered': 'Con relevo',
+        'breaks.addBreak': 'Registrar descanso',
+        'breaks.editBreak': 'Editar descanso',
+        'breaks.deleteBreak': 'Eliminar descanso',
+        'breaks.warnOutsideShift': 'El descanso se sale del turno ({{turno}}).',
+        'breaks.warnInvalidTimes': 'Las horas del descanso no son válidas.',
+        'breaks.warnOverlapsOwn': 'Se solapa con otro descanso que ya tiene ese mismo día.',
+        'breaks.warnCoverBusy': '{{nombre}} ya tiene un turno en {{lugar}} a esas horas.',
+        'breaks.warnCoverAlone': 'Si {{nombre}} cubre este descanso, su propia locación se queda sin nadie a esas horas.',
+        'breaks.warnCoverThin': 'Si {{nombre}} cubre este descanso, su locación se queda con menos gente a esas horas.',
+        'confirm.deleteBreak': '¿Eliminar este descanso?',
+        'employees.dayOffCannotAssign': '{{nombre}} no puede trabajar: descansa los {{dia}}. No se le puede asignar ese día.',
+        'employees.dayOffCannotAssignGeneric': '{{nombre}} no está disponible ese día ({{estado}}). No se le puede asignar.',
     },
 
     en: {
@@ -6769,7 +6906,6 @@ const I18N = {
         'notify.assignmentDeleted': 'Assignment deleted',
         'notify.assignmentsUpdated': 'Assignments updated',
         'notify.breakConfigured': 'Break configured',
-        'notify.breakDeleted': 'Break deleted',
         'notify.breakSaved': 'Break configuration saved',
         'notify.breakSavedInspection': 'Inspection saved',
         'notify.clearing': 'Clearing data...',
@@ -7246,6 +7382,58 @@ const I18N = {
         'reports.noResults': 'Ningún empleado coincide.',
         'reports.error': 'No se pudo cargar el reporte.',
         'reports.export': 'Exportar CSV',
+        'status.unavailableDayOff': 'Unavailable — Day Off',
+        'employees.dayOffLabel': 'Day Off',
+        'employees.dayOffRecurrentHint': 'Days of the week they do not work. Mark any of them, or none.',
+        'employees.dayOffNoLimitHint': 'There is no limit: mark as many days off as needed.',
+        'employees.dayOffStatus': 'Unavailable — Day Off',
+        'employees.dayOffExceptionHint': 'Exceptions: a single day off, for a specific date. It does not change the weekdays above.',
+        'employees.dayOffExceptionReason': 'Reason (optional)',
+        'employees.dayOffAddException': 'Add',
+        'employees.dayOffNoExceptions': 'No exceptions recorded',
+        'employees.dayOffRemoveException': 'Remove this exception',
+        'employees.dayOffExceptionBadDate': 'Pick a valid date for the exception.',
+        'employees.dayOffExceptionDuplicate': 'There is already an exception for that date.',
+        'employees.dayOffConflictTitle': 'There are shifts on a day that is now off',
+        'employees.dayOffConflictHint': 'These shifts already existed. They have not been deleted: it is up to you to keep or remove them.',
+        'employees.dayOffUnknownLocation': 'no location',
+        'employees.days.monday': 'Monday',
+        'employees.days.tuesday': 'Tuesday',
+        'employees.days.wednesday': 'Wednesday',
+        'employees.days.thursday': 'Thursday',
+        'employees.days.friday': 'Friday',
+        'employees.days.saturday': 'Saturday',
+        'employees.days.sunday': 'Sunday',
+        'breaks.panelTitle': 'Breaks for the day',
+        'breaks.colEmployee': 'Employee',
+        'breaks.colLocation': 'Location',
+        'breaks.colShift': 'Shift',
+        'breaks.colType': 'Type',
+        'breaks.colTime': 'Time',
+        'breaks.colDuration': 'Duration',
+        'breaks.colCoveredBy': 'Covered by',
+        'breaks.colActions': 'Actions',
+        'breaks.selfBreakLabel': 'Self Break',
+        'breaks.coveredByLabel': 'Break Relief',
+        'breaks.noBreak': 'No break',
+        'breaks.noAssignments': 'Nobody is assigned for this date.',
+        'breaks.unknownLocation': 'No location',
+        'breaks.summaryWith': 'With break',
+        'breaks.summaryWithout': 'Without break',
+        'breaks.summaryCovered': 'With relief',
+        'breaks.addBreak': 'Record break',
+        'breaks.editBreak': 'Edit break',
+        'breaks.deleteBreak': 'Delete break',
+        'breaks.warnOutsideShift': 'The break falls outside the shift ({{turno}}).',
+        'breaks.warnInvalidTimes': 'The break times are not valid.',
+        'breaks.warnOverlapsOwn': 'It overlaps another break they already have that day.',
+        'breaks.warnCoverBusy': '{{nombre}} already has a shift at {{lugar}} at that time.',
+        'breaks.warnCoverAlone': 'If {{nombre}} covers this break, their own location is left with nobody at that time.',
+        'breaks.warnCoverThin': 'If {{nombre}} covers this break, their location is left with fewer people at that time.',
+        'confirm.deleteBreak': 'Delete this break?',
+        'notify.breakDeleted': 'Break deleted',
+        'employees.dayOffCannotAssign': '{{nombre}} cannot work: they have {{dia}} off. They cannot be assigned that day.',
+        'employees.dayOffCannotAssignGeneric': '{{nombre}} is not available that day ({{estado}}). They cannot be assigned.',
     }
 };
 

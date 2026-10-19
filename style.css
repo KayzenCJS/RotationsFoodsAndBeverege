@@ -1928,3 +1928,244 @@ img, video, iframe { max-width:100%; height:auto; }
     .imp-map-select { max-width: 150px; }
     .imp-history-row { flex-direction: column; align-items: flex-start; gap:.2rem; }
 }
+
+/* ==================== PANEL DE BREAKS ==================== */
+/* Sustituye al "Assignment Result". Es una tabla, no ungrid de tarjetas: lo
+   que se hace aquí es mirar y ajustar descansos, y para eso una fila por
+   persona va mejor que un recuadro grande. */
+.break-management {
+    margin-top: 1.25rem;
+    border: 1px solid var(--border-soft, rgba(127, 127, 127, .22));
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.break-management-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding: .7rem .9rem;
+    background: var(--bg-section, rgba(127, 127, 127, .07));
+    border-bottom: 1px solid var(--border-soft, rgba(127, 127, 127, .22));
+}
+
+.break-management-header h4 {
+    margin: 0;
+    font-size: .95rem;
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+}
+
+.break-management-summary {
+    display: flex;
+    gap: .4rem;
+    flex-wrap: wrap;
+}
+
+.break-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    padding: .2rem .55rem;
+    border-radius: 999px;
+    font-size: .76rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.break-chip-ok       { background: var(--status-available-bg, #E6F4EA); color: var(--status-available-text, #1E7E34); }
+.break-chip-missing  { background: var(--status-warning-bg, #FEF3E0); color: var(--status-warning-text, #8A5A00); }
+.break-chip-covered  { background: var(--status-break-bg, #E4EFFB); color: var(--status-break-text, #1B5E9E); }
+
+.break-management-table-wrap {
+    overflow-x: auto;
+}
+
+.break-management-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .84rem;
+}
+
+.break-management-table th {
+    text-align: left;
+    font-weight: 600;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--text-tertiary);
+    padding: .5rem .7rem;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border-soft, rgba(127, 127, 127, .22));
+    white-space: nowrap;
+}
+
+.break-management-table td {
+    padding: .45rem .7rem;
+    border-bottom: 1px solid var(--border-soft, rgba(127, 127, 127, .14));
+    vertical-align: middle;
+}
+
+.break-management-table tbody tr:hover {
+    background: var(--bg-hover, rgba(127, 127, 127, .06));
+}
+
+/* Los que todavía no tienen descanso: se ven enseguida. */
+.break-row-sin-descanso td {
+    background: var(--status-warning-bg, rgba(250, 200, 90, .10));
+}
+
+/* Alguien con día libre que además tiene turno: es un conflicto que hay que
+   ver, no una fila más. */
+.break-row-dia-libre td {
+    background: var(--status-dayoff-bg, rgba(127, 127, 127, .12));
+}
+.break-row-dia-libre td:first-child {
+    box-shadow: inset 3px 0 0 var(--status-dayoff, #6B7280);
+}
+
+.break-emp { white-space: nowrap; }
+.break-conflict-flag {
+    color: var(--status-warning, #B26A00);
+    margin-left: .35rem;
+}
+
+.break-tag-none    { opacity: .8; font-style: italic; }
+.break-tag-self    { background: var(--status-break-bg, #E4EFFB); color: var(--status-break-text, #1B5E9E); }
+.break-tag-covered { background: var(--status-available-bg, #E6F4EA); color: var(--status-available-text, #1E7E34); }
+
+.break-actions { white-space: nowrap; text-align: right; }
+.break-actions .btn { padding: .25rem .45rem; }
+
+.break-management-empty {
+    padding: 1.1rem;
+    text-align: center;
+    color: var(--text-tertiary);
+    font-size: .85rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .45rem;
+}
+
+/* ==================== DÍAS LIBRES (FICHA DEL EMPLEADO) ==================== */
+.day-off-box {
+    padding: .75rem .85rem;
+    border: 1px solid var(--border-soft, rgba(127, 127, 127, .22));
+    border-radius: 8px;
+    background: var(--bg-section, rgba(127, 127, 127, .05));
+}
+
+.day-off-week {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem;
+}
+
+.day-off-weekday {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    padding: .3rem .55rem;
+    border: 1px solid var(--border-soft, rgba(127, 127, 127, .28));
+    border-radius: 999px;
+    font-size: .8rem;
+    cursor: pointer;
+    user-select: none;
+    transition: background .15s, border-color .15s;
+}
+.day-off-weekday:hover { background: var(--bg-hover, rgba(127, 127, 127, .1)); }
+.day-off-weekday:has(input:checked) {
+    background: var(--primary-color, #c8102e);
+    border-color: var(--primary-color, #c8102e);
+    color: #fff;
+}
+.day-off-weekday input { margin: 0; cursor: pointer; }
+
+.day-off-exceptions {
+    padding: .75rem .85rem;
+    border: 1px solid var(--border-soft, rgba(127, 127, 127, .22));
+    border-radius: 8px;
+    background: var(--bg-section, rgba(127, 127, 127, .05));
+}
+
+.day-off-exception-row {
+    display: flex;
+    gap: .4rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.day-off-exception-row input[type="date"] {
+    padding: .4rem .5rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-soft, rgba(127, 127, 127, .3));
+    background: var(--bg-card);
+    color: var(--text-primary);
+}
+.day-off-exception-row input[type="text"] {
+    flex: 1;
+    min-width: 160px;
+    padding: .4rem .5rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-soft, rgba(127, 127, 127, .3));
+    background: var(--bg-card);
+    color: var(--text-primary);
+}
+
+.day-off-exception-list {
+    margin-top: .55rem;
+    display: flex;
+    flex-direction: column;
+    gap: .3rem;
+}
+
+.day-off-exception-item {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .35rem .55rem;
+    border-radius: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft, rgba(127, 127, 127, .2));
+    font-size: .82rem;
+}
+.day-off-exception-date { font-weight: 600; }
+.day-off-exception-reason { color: var(--text-secondary); flex: 1; }
+
+/* El aviso de que ya habia un turno ese dia. No bloquea: informa. */
+.day-off-warnings:empty { display: none; }
+
+.day-off-warning {
+    display: flex;
+    gap: .55rem;
+    align-items: flex-start;
+    margin-top: .7rem;
+    padding: .65rem .8rem;
+    border-radius: 8px;
+    border: 1px solid var(--status-warning, #B26A00);
+    background: var(--status-warning-bg, rgba(250, 200, 90, .12));
+    color: var(--text-primary);
+    font-size: .83rem;
+}
+.day-off-warning i { color: var(--status-warning, #B26A00); margin-top: .1rem; }
+.day-off-warning p { margin: .25rem 0; color: var(--text-secondary); }
+.day-off-warning ul { margin: .3rem 0 0; padding-left: 1.1rem; color: var(--text-secondary); }
+
+@media (max-width: 720px) {
+    .break-management-table { font-size: .78rem; }
+    .break-management-table th,
+    .break-management-table td { padding: .4rem .45rem; }
+    .day-off-exception-row { flex-direction: column; align-items: stretch; }
+    .day-off-exception-row input { width: 100%; }
+}
+
+/* Empleado que no puede trabajar el día que se está viendo. Sale en el listado
+   con este tono, para que se vea por qué está ahí y no desaparezca. */
+.employee-option-bloqueado {
+    background: var(--status-dayoff-bg, rgba(127, 127, 127, .1));
+}
+.employee-option-bloqueado:hover {
+    background: var(--status-dayoff-bg, rgba(127, 127, 127, .18));
+}

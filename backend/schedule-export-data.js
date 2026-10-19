@@ -18,6 +18,12 @@
 //  decir en el informe cuantas locaciones se quedaron sin determinar.
 const EXPORT = require('./schedule-export.js');
 
+// La regla de "dia libre" NO se reimplementa aqui: vive en dias-libres.js, que
+// es donde ya la usan el backend, el motor de reparto y el panel de la fecha.
+// Escribir una segunda version haria que un dia libre bloquease en un sitio y
+// no en otro.
+const DIAS_LIBRES = require('./dias-libres.js');
+
 const normCat = (s) => String(s == null ? '' : s).toLowerCase().replace(/[_\s-]+/g, ' ').trim();
 
 // ===========================================================================
@@ -456,6 +462,19 @@ const nombreCategoria = (clave, soloCatalogo) => {
     }));
 
     // -----------------------------------------------------------------------
+    //  Dias libres del dia
+    // -----------------------------------------------------------------------
+    // Se pide siempre, haya turnos o no: el archivo tiene que enseñar tambien
+    // a quien NO puede trabajar ese dia. Si la consulta falla, la lista sale
+    // vacia y el resto del export sigue exactamente igual.
+    let diasLibres = [];
+    try {
+        diasLibres = await obtenerDiasLibres(pool, fecha);
+    } catch (err) {
+        console.error('Aviso: no se ha podido obtener la lista de dias libres (' + err.message + ')');
+    }
+
+    // -----------------------------------------------------------------------
     //  Informe: que se exporto y que no se pudo determinar
     // -----------------------------------------------------------------------
     const seccionesConPersonal = [...izq.values(), ...der.values()].filter(s =>
@@ -473,6 +492,10 @@ const nombreCategoria = (clave, soloCatalogo) => {
         },
         importData,
         empleados: empleadosHoja,
+        // Quien NO puede trabajar ese dia. Va fuera del horario a proposito:
+        // no es un turno, asi que no se dibuja en ninguna seccion ni se
+        // contabilizan horas. El exportador lo escribe en su propia hoja.
+        diasLibres,
         informe: {
             asignaciones: asignaciones.length,
             enImportData: importData.length,
@@ -493,6 +516,11 @@ const nombreCategoria = (clave, soloCatalogo) => {
             // Turnos que salen en Import Data pero no en la hoja visual, porque
             // no hay ningun nombre real con el que abrir su seccion.
             asignacionesSinNombre: asignacionesSinNombre,
+            // Quien no puede trabajar ese dia. Se informa tambien en el informe
+            // para que se vea en la vista previa del export sin abrir el
+            // archivo. La lista es la misma que va en `datos.diasLibres`.
+            diasLibres,
+            diasLibresConteo: diasLibres.length,
             areasIzq: izqAreas,
             areasDer: derAreas,
             tiposIzq: izqTipos,
@@ -512,4 +540,143 @@ const nombreCategoria = (clave, soloCatalogo) => {
     };
 }
 
-module.exports = { obtenerDatos };
+// ============================================================================
+//  DIAS LIBRES: QUIEN NO PUEDE TRABAJAR ESE DIA
+// ============================================================================
+//  El horario exportado enseña a quien tiene turno. Falta lo otro: quien ese
+//  dia esta libre y por eso no aparece en ninguna seccion. Sin esta lista,
+//  quien recibe el archivo no puede saber si alguien "no tiene turno" o es que
+//  no puede trabajar, y esa confusion es justo la que se quiere evitar.
+//
+//  La regla NO se reimplementa: se usa backend/dias-libres.js, que es donde
+//  vive la definicion de dia libre (el recurrente, la excepcion por fecha y la
+//  marca de "hoy") y que ya usan el backend, el motor de reparto y el panel de
+//  la fecha.
+//
+//  DEGRADA SIN ROMPERSE: si la tabla de excepciones no existe todavia (base sin
+//  la migracion), la lista sale solo con los dias recurrentes, que viven en
+//  employee_availability y existen siempre. El export no se cae por eso.
+async function obtenerDiasLibres(pool, fecha) {
+    const fechaISO = String(fecha || '').slice(0, 10);
+
+    // Se piden TODOS los empleados, no solo los que tienen turno: el punto de
+    // esta seccion es justamente ver a quien NO sale en el horario.
+    //
+    // La consulta va dentro de su propio try: esta hoja es un extra, y un
+    // extra no puede tumbar el export. Si falla, la lista sale vacia.
+    let empleados = [];
+    try {
+        empleados = (await pool.query(
+            `SELECT id, name, role, COALESCE(NULLIF(group_id, ' '), '') AS group_id
+               FROM employees ORDER BY name`)).rows;
+    } catch (err) {
+        console.error('Aviso: no se han podido leer los empleados para la lista de dias libres (' + err.message + ')');
+        return [];
+    }
+
+    if (!empleados.length) return [];
+
+    const ids = empleados.map(e => Number(e.id)).filter(n => Number.isInteger(n));
+    if (!ids.length) return [];
+
+    // ¿Existe la tabla de excepciones? Se mira ANTES de usarla porque en una
+    // base sin la migracion la consulta falla, y una hoja de apoyo no puede
+    // tumbar el export entero.
+    let hayExcepciones = false;
+    try {
+        const r = await pool.query(
+            "SELECT to_regclass('public.employee_day_off_exceptions') AS t");
+        hayExcepciones = !!r.rows[0].t;
+    } catch (e) {
+        hayExcepciones = false;
+    }
+
+    let bloqueados = [];
+    try {
+        bloqueados = hayExcepciones
+            ? await DIAS_LIBRES.listadoNoDisponibles(pool, ids, fechaISO)
+            : await recurrentesSinTabla(pool, ids, fechaISO);
+    } catch (err) {
+        // La tabla existe pero la consulta ha fallado, o la tabla no existe y
+        // ha fallado la de disponibilidad. En los dos casos el export tiene que
+        // salir: se avisa y se sigue con lo que se pueda leer.
+        console.error('Aviso: no se ha podido leer la lista de dias libres (' + err.message + ')');
+        try {
+            bloqueados = await recurrentesSinTabla(pool, ids, fechaISO);
+        } catch (err2) {
+            console.error('Aviso: tampoco se han podido leer los dias recurrentes (' + err2.message + ')');
+            bloqueados = [];
+        }
+    }
+
+    const empPor = new Map(empleados.map(e => [Number(e.id), e]));
+
+    return bloqueados.map(b => {
+        const emp = empPor.get(Number(b.employee_id)) || {};
+        return {
+            employee_id: Number(b.employee_id),
+            nombre: emp.name || '',
+            rol: emp.role || '',
+            grupo: emp.group_id || '',
+            // Que clase de dia libre es: "recurrente" (el dia de la semana que
+            // descansa), "excepcion" (una fecha concreta) o "hoy" (la marca de
+            // la ficha).
+            tipo: b.tipo || '',
+            // El dia libre REGISTRADO: el nombre del dia si es recurrente, la
+            // fecha si es una excepcion (o la marca de "hoy"). Se escribe tal
+            // cual esta, que es como vive en la base.
+            diaLibre: b.diaSemana || b.fecha || fechaISO,
+            // La fecha del horario que se esta exportando.
+            fecha: fechaISO,
+            // El motivo: el texto de la excepcion si la hay y, si no, el que ya
+            // da dias-libres.js ("descansa los monday", "día libre", ...).
+            motivo: b.motivo || b.etiqueta || '',
+            // El texto de dias-libres.js tal cual, por si hace falta suelto.
+            etiqueta: b.etiqueta || ''
+        };
+    });
+}
+
+// La parte de la lista que se puede calcular SIN la tabla de excepciones: el
+// dia libre RECURRENTE, que vive en employee_availability.days_off.
+//
+// Se usan las MISMAS funciones del modulo (normalizarDias, diaSemana y
+// esDiaLibreRecurrente), no una copia de la regla: si la regla cambia, esto
+// cambia con ella. El resultado tiene la misma forma que el de
+// listadoNoDisponibles, para que el que arma el archivo no tenga que mirar de
+// donde ha salido cada fila.
+async function recurrentesSinTabla(pool, ids, fechaISO) {
+    const disp = (await pool.query(
+        `SELECT employee_id, is_day_off, days_off
+           FROM employee_availability
+          WHERE employee_id = ANY($1::int[])`, [ids])).rows;
+
+    const porEmpleado = new Map(disp.map(d => [Number(d.employee_id), d]));
+    const hoy = DIAS_LIBRES.diaSemana(fechaISO);
+    const salida = [];
+
+    for (const id of ids) {
+        const d = porEmpleado.get(id);
+        if (!d) continue;
+
+        // La marca de "hoy" es lo mas explicito: esta libre ese dia.
+        if (d.is_day_off === true) {
+            salida.push({
+                employee_id: id, tipo: 'hoy', etiqueta: 'día libre',
+                fecha: fechaISO, motivo: null
+            });
+            continue;
+        }
+
+        // El dia de la semana que descansa.
+        if (DIAS_LIBRES.esDiaLibreRecurrente(d, fechaISO) && hoy) {
+            salida.push({
+                employee_id: id, tipo: 'recurrente', etiqueta: 'descansa los ' + hoy,
+                fecha: fechaISO, diaSemana: hoy, motivo: null
+            });
+        }
+    }
+    return salida;
+}
+
+module.exports = { obtenerDatos, obtenerDiasLibres };
