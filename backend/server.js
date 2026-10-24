@@ -2320,7 +2320,14 @@ async function performBackup(type) {
         database: type === 'foods' ? 'storyland_foods' : 'storyland_retail'
     };
 
-    const pgDumpCmd = `pg_dump -h ${dbConfig.host} -p ${dbConfig.port} -U ${dbConfig.user} ${dbConfig.database} > "${backupFile}"`;
+    // El binario vive en la carpeta de PostgreSQL y NO siempre esta en el PATH
+    // del sistema (en Windows no se agrega solo con instalar). Se busca con ruta
+    // completa y se resuelve de forma robusta, para que el backup no falle.
+    const pgBinDir = process.env.PG_BIN_DIR || 'C:/Program Files/PostgreSQL/18/bin';
+    const pgDumpExe = fs.existsSync(path.join(pgBinDir, 'pg_dump.exe'))
+        ? path.join(pgBinDir, 'pg_dump.exe')
+        : 'pg_dump';
+    const pgDumpCmd = `"${pgDumpExe}" -h ${dbConfig.host} -p ${dbConfig.port} -U ${dbConfig.user} ${dbConfig.database} > "${backupFile}"`;
 
     return new Promise((resolve, reject) => {
         exec(pgDumpCmd, { env: { ...process.env, PGPASSWORD: process.env.DB_PASSWORD } }, (error, stdout, stderr) => {
