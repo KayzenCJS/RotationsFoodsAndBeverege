@@ -147,6 +147,20 @@ async function cargarEstado(pool, fecha, opcionales = {}) {
         `SELECT id, name, serves_alcohol FROM locations
           WHERE ${retiradas.SOLO_ACTIVAS} ORDER BY id`)).rows;
 
+    // --- Historial de trabajo por localizacion ----------------------------
+    // Donde cada persona ha trabajado. Se usa como criterio de experiencia
+    // (prefiere a quien ya conoce el edificio) pero nunca como sustituto del
+    // entrenamiento: la elegibilidad la deciden formacion y certificados.
+    const histRows = await pool.query(
+        `SELECT DISTINCT employee_id, location_id FROM assignments
+          WHERE location_id IS NOT NULL`);
+    const historiales = new Map();
+    for (const h of histRows.rows) {
+        if (!h.location_id) continue;
+        if (!historiales.has(h.employee_id)) historiales.set(h.employee_id, []);
+        historiales.get(h.employee_id).push(h.location_id);
+    }
+
     // --- Personas, con todo lo que decide si pueden trabajar ---------------
     // Una sola consulta con losTraining y la disponibilidad agrupados. El
     // array_agg evita una consulta por persona.
@@ -176,6 +190,7 @@ async function cargarEstado(pool, fecha, opcionales = {}) {
             formaciones,
             grupos,
             localizacionesEntrenadas: e.entrenadas || [],
+            historial: historiales.get(e.id) || [],
             papeles: [...papelesDe({ roles, formaciones })],
             disponibilidad: {
                 is_on_break: !!e.is_on_break,

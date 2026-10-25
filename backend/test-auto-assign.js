@@ -582,6 +582,61 @@ for (const [campo, motivo] of [
 }
 
 // ============================================================================
+console.log('\n=== 11. LA EXPERIENCIA EN LA LOCALIZACION PREMIOS A QUIEN LA TIENE ===');
+console.log('     Entre candidatos elegibles, quien ya trabajo en el edificio puntua mas.\n');
+
+{
+    const conHistorial = persona(1, ['cashier'], { historial: ['local-a'] });
+    const sinHistorial = persona(2, ['cashier'], { historial: [] });
+    const reglas = [regla('local-a', 1, [{ role: 'cashier', count: 1 }])];
+
+    const r = escenario(reglas, [sinHistorial, conHistorial]);
+
+    eq(r.asignaciones.length, 1, 'se cubre el puesto');
+    eq(r.asignaciones[0].employee_id, 1, '  con la que tiene historial en esa localizacion');
+}
+
+// ============================================================================
+console.log('\n=== 12. EL ENTRENAMIENTO ES RESTRICCION SOLO EN MODO ESTRICTO ===');
+console.log('     Sin entrenar en la localizacion se propone igual (preferencia),');
+console.log('     pero con entrenamientoObligatorio activado no se propone nadie.\n');
+
+{
+    const solo = persona(1, ['cashier'], { localizacionesEntrenadas: [], historial: ['local-a'] });
+    const reglas = [regla('local-a', 1, [{ role: 'cashier', count: 1 }])];
+
+    const rEstricta = escenario(reglas, [solo], { config: { entrenamientoObligatoria: true } });
+    eq(rEstricta.asignaciones.length, 0, 'en modo estricto no se propone sin entrenamiento');
+    ok(rEstricta.descartes.some(d => /entrenamiento/.test(d.motivo)),
+        '  y se explica por que no');
+
+    const rBlanda = escenario(reglas, [solo], { config: {} });
+    eq(rBlanda.asignaciones.length, 1, 'en modo normal se propone (el entrenamiento es preferencia)');
+    ok(rBlanda.asignaciones[0].avisos.some(a => /sin formacion/i.test(a)),
+        '  y se avisa de que no tiene formacion registrada');
+}
+
+// ============================================================================
+console.log('\n=== 13. EL BALANCE USA LA CARGA REAL DEL DIA ===');
+console.log('     Quien ya tiene turno ese dia carga mas que quien no.\n');
+
+{
+    const a = persona(1, ['cashier']);
+    const b = persona(2, ['cashier']);
+    const reglas = [regla('local-a', 1, [{ role: 'cashier', count: 1 }])];
+
+    const r = escenario(reglas, [a, b], {
+        // A tiene un turno ese dia en OTRA localizacion: carga real > 0, pero no
+        // cubre el puesto de local-a.
+        compromisos: [turno(a, 'Local B', '09:00', '13:00', { location_id: 'local-b', role: 'cashier' })],
+        ventanas: { 'local-a': ventana('18:00', '22:00') }
+    });
+
+    eq(r.asignaciones.length, 1, 'se cubre el puesto');
+    eq(r.asignaciones[0].employee_id, 2, '  con la que no tiene turno ese dia (menos carga)');
+}
+
+// ============================================================================
 console.log('\n' + '='.repeat(68));
 console.log('  ' + pass + ' pasaron, ' + fail + ' fallaron');
 if (fail) { console.log('\nFALLOS:'); fallos.forEach((f, i) => console.log('  ' + (i + 1) + ') ' + f)); }

@@ -246,11 +246,34 @@ function evaluarElegibilidad({ empleado, puesto, compromisos, zonaDe, config }) 
         avisos.push('no es de la zona de esta localizacion');
     }
 
-    // --- 8. Entrenamiento en la localizacion (PREFERENCIA) -------------------
+    // --- 8. Entrenamiento en la localizacion (BLOQUEANTE si el modo es
+    //      estricto, PREFERENCIA si no lo es) ----------------------------
     // Solo 12 personas tienen localizaciones entrenadas guardadas, asi que no
-    // puede ser bloqueante: casi nadie lo tendria y nadie podria trabajar.
-    if (empleado.localizacionesEntrenadas.includes(puesto.location_id)) puntuacion += 15;
-    else avisos.push('sin formacion registrada en ' + puesto.locationId);
+    // puede ser bloqueante por defecto: casi nadie lo tendria y nadie podria
+    // trabajar. Con `entrenamientoObligatorio` activado (config), pasa a ser una
+    // restriccion real: nadie sin entrenamiento en la localizacion se propone,
+    // aunque tenga experiencia en otros edificios.
+    const tieneEntrenamiento = (empleado.localizacionesEntrenadas || [])
+        .includes(puesto.location_id);
+    if (config && config.entrenamientoObligatoria) {
+        if (!tieneEntrenamiento) {
+            return { ok: false, motivo: 'sin entrenamiento en ' + puesto.location_id, avisos, puntuacion };
+        }
+    } else if (tieneEntrenamiento) {
+        puntuacion += 15;
+    } else {
+        avisos.push('sin formacion registrada en ' + puesto.location_id);
+    }
+
+    // --- 8b. Experiencia en la localizacion (PREFERENCIA entre elegibles) --
+    // El historial en un edificio suma puntos a quien ya ha trabajado alla.
+    // Nunca sustituye al entrenamiento: la elegibilidad ya la decidieron la
+    // formacion y las certificaciones antes de llegar aqui, y este solo ordena
+    // entre los que ya son elegibles.
+    const historial = Array.isArray(empleado.historial) ? empleado.historial : [];
+    if (historial.indexOf(puesto.location_id) >= 0) {
+        puntuacion += 12;
+    }
 
     // --- 9. Cuanta gente ha cargado ya --------------------------------------
     // Reparto equilibrado: se prefiere a quien menos turnos lleva.
@@ -397,7 +420,15 @@ function planificar(contexto) {
     const candidatosPorPuesto = new Map();
     const diagnostico = new Map();      // puesto_id -> por que no puede cada persona
     const descartes = [];
+    // Carga REAL de cada persona para ese dia. Las que ya tienen turno (o la que
+    // se les acaba de proponer) son trabajo que el reparto ya tiene asumido, asi
+    // que se premia a quien menos carga. Antes se partia en cero: el balance se
+    // hacia solo con lo que la propia propuesta iba acumulando en el reparto.
     const cargas = new Map();
+    for (const c of unicos) {
+        if (c.employee_id == null) continue;
+        cargas.set(c.employee_id, (cargas.get(c.employee_id) || 0) + 1);
+    }
 
     for (const p of lista) {
         const aptos = [];
