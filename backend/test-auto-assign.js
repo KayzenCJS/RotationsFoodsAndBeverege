@@ -637,6 +637,30 @@ console.log('     Quien ya tiene turno ese dia carga mas que quien no.\n');
 }
 
 // ============================================================================
+console.log('\n=== 14. UNA LOCALIZACION ACTIVA SIN REGLA NO ES CERRADA NI CUBIERTA =====');
+console.log('     Es un estado distinto: sin regla no se pide personal, no se cierra,\n     y no debe contar como "todo cubierto" cuando hay reglas sin atender.\n');
+
+{
+    // local-a tiene regla y queda cubierta. local-b esta activa pero sin regla.
+    const reglas = [regla('local-a', 1, [{ role: 'cashier', count: 1 }])];
+    const r = A.planificar({
+        fecha: '2026-07-15',
+        diaSemana: 'wednesday',
+        reglas,
+        locations: [local('local-a', 'A'), local('local-b', 'B')],
+        empleados: [persona(1, ['cashier'])],
+        compromisos: [],
+        ventanas: { 'local-a': ventana('09:00', '17:00') },
+        zonaDe: {}, config: {}
+    });
+
+    ok(r.sinRegla.includes('local-b'), 'local-b activa sin regla se reporta en sinRegla');
+    ok(!r.porLocalizacion['local-b'], 'local-b no se lista como cerrada ni como cumplida');
+    eq(r.porLocalizacion['local-a'].cumple, true, 'local-a (con regla) queda cubierta');
+    eq(r.todoCubierto, false, 'con una local sin regla, el dia NO se da por cubierto');
+}
+
+// ============================================================================
 console.log('\n' + '='.repeat(68));
 console.log('  ' + pass + ' pasaron, ' + fail + ' fallaron');
 if (fail) { console.log('\nFALLOS:'); fallos.forEach((f, i) => console.log('  ' + (i + 1) + ') ' + f)); }

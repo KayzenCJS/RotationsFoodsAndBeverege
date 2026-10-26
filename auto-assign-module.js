@@ -75,6 +75,12 @@ function mostrarResumenAutoAssign(p) {
     const cumplidos = locales.filter(v => v.cumple);
     const sinCumplir = locales.filter(v => !v.cumple);
     const cerrados = locales.filter(v => v.cerrada);
+    // Localizaciones activas sin regla de personal: estado distinto de las
+    // anteriores, y no deben aparecer como "cerrada" ni como "cumplida".
+    const sinReglaLocs = (p.sinRegla || []).map(id => ({
+        location_id: id, nombre: id, cerrada: false, cumple: false,
+        min_employees: 0, faltan: [], sinRegla: true
+    }));
 
     const modal = document.createElement('div');
     modal.className = 'modal auto-assign-modal';
@@ -83,7 +89,7 @@ function mostrarResumenAutoAssign(p) {
     modal.style.display = 'flex';
 
     modal.innerHTML = `
-        <div class="modal-content" style="max-width:1000px;max-height:92vh;overflow-y:auto;">
+        <div class="modal-content">
 
             <div class="results-header">
                 <h4><i class="fas fa-robot"></i> ${esc(t('autoAssign.titulo'))}</h4>
@@ -108,12 +114,13 @@ function mostrarResumenAutoAssign(p) {
                     ${esc(t('autoAssign.duplicados', { n: p.compromisosDuplicados }))}
                 </div>` : ''}
 
-            ${resumenCobertura(locales, cumplidos, sinCumplir, cerrados)}
+            ${resumenCobertura([...locales, ...sinReglaLocs], cumplidos, sinCumplir, cerrados)}
 
             ${p.asignaciones.length ? `
                 <div class="auto-assign-bloque">
                     <h5><i class="fas fa-user-plus"></i>
                         ${esc(t('autoAssign.propuestas', { n: p.asignaciones.length }))}</h5>
+                    <div class="auto-assign-tabla-wrap">
                     <table class="auto-assign-tabla">
                         <thead><tr>
                             <th>${esc(t('autoAssign.colEmpleado'))}</th>
@@ -138,12 +145,14 @@ function mostrarResumenAutoAssign(p) {
                                 </tr>`).join('')}
                         </tbody>
                     </table>
+                    </div>
                 </div>` : ''}
 
             ${p.sinCubrir && p.sinCubrir.length ? `
                 <div class="auto-assign-bloque auto-assign-huecos">
                     <h5><i class="fas fa-triangle-exclamation"></i>
                         ${esc(t('autoAssign.sinCubrir', { n: p.sinCubrir.length }))}</h5>
+                    <div class="auto-assign-tabla-wrap">
                     <table class="auto-assign-tabla">
                         <thead><tr>
                             <th>${esc(t('autoAssign.colLocalizacion'))}</th>
@@ -164,6 +173,7 @@ function mostrarResumenAutoAssign(p) {
                                 </tr>`).join('')}
                         </tbody>
                     </table>
+                    </div>
                 </div>` : ''}
 
             ${resumenDescartes(p)}
@@ -196,6 +206,13 @@ function resumenCabecera(p) {
     const clase = p.todoCubierto ? 'auto-assign-ok' : 'auto-assign-parcial';
     const titular = p.todoCubierto ? t('autoAssign.todoCubierto') : t('autoAssign.falta');
 
+    // Si los minimos configurados SÍ están cubiertos pero existen localizaciones
+    // activas sin regla de personal, se muestra ese matiz en lugar del "todo cubierto".
+    let subtitulo = '';
+    if (!p.todoCubierto && p.minimosCubiertos && (p.sinRegla || []).length) {
+        subtitulo = `<div class="auto-assign-titulo-sub">${esc(t('autoAssign.minimosCubiertosSinRegla', { n: (p.sinRegla || []).length }))}</div>`;
+    }
+
     return `
         <div class="auto-assign-cabecera ${clase}">
             <div class="auto-assign-cifras">
@@ -212,7 +229,7 @@ function resumenCabecera(p) {
                     <span class="etiqueta">${esc(t('autoAssign.puestosSinCubrir'))}</span>
                 </div>
             </div>
-            <div class="auto-assign-titular">${esc(titular)}</div>
+            <div class="auto-assign-titular">${esc(titular)}${subtitulo ? `<br>${subtitulo}` : ''}</div>
         </div>`;
 }
 
@@ -220,18 +237,23 @@ function resumenCobertura(locales, cumplidos, sinCumplir, cerrados) {
     if (!locales.length) return '';
 
     const fila = (v) => {
+        // Estados diferenciados: cerrada, sin regla de personal, cumple o falta.
+        // Una local sin regla NO es una local cerrada ni una local cumplida: es
+        // un estado aparte ("No staffing rule").
         const estado = v.cerrada
             ? `<span class="auto-assign-pill pill-cerrada">${esc(t('autoAssign.cerrada'))}</span>`
-            : v.cumple
-                ? `<span class="auto-assign-pill pill-ok">${esc(t('autoAssign.cumpleMinimo'))}</span>`
-                : `<span class="auto-assign-pill pill-falta">${esc(t('autoAssign.faltaMinimo'))}</span>`;
-        const detalle = v.cerrada ? '' : (v.faltan || [])
+            : v.sinRegra
+                ? `<span class="auto-assign-pill pill-info">${esc(t('autoAssign.sinRegra'))}</span>`
+                : v.cumple
+                    ? `<span class="auto-assign-pill pill-ok">${esc(t('autoAssign.cumpleMinimo'))}</span>`
+                    : `<span class="auto-assign-pill pill-falta">${esc(t('autoAssign.faltaMinimo'))}</span>`;
+        const detalle = (v.cerrada || v.sinRegra) ? '' : (v.faltan || [])
             .map(f => `${esc(f.rol)} ×${f.faltan}`
                 + (f.certificaciones && f.certificaciones.length ? ` (${esc(f.certificaciones.join(', '))})` : ''))
             .join(', ');
         return `<tr>
             <td>${esc(v.nombre)}</td>
-            <td>${v.cerrada ? '-' : v.min_employees}</td>
+            <td>${(v.cerrada || v.sinRegra) ? '-' : v.min_employees}</td>
             <td>${estado}</td>
             <td class="auto-assign-motivo">${esc(detalle)}</td>
         </tr>`;

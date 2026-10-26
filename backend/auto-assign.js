@@ -596,6 +596,15 @@ function planificar(contexto) {
 
     const incompletas = Object.values(porLocalizacion).filter(v => !v.cumple);
 
+    // Localizaciones activas sin regla de personal configurada. Es un estado
+    // DISTINTO de "cerrada" y de "cumplida": la primera significa "no se pide
+    // personal", la segunda "se pide y se cumple". Antes no se devolvia y el
+    // resumen podia decir "every minimum is covered" mientras el panel avisa de
+    // que existen localizaciones sin reglas.
+    const sinRegla = (contexto.locations || [])
+        .filter(l => !(contexto.reglas || []).some(r => r.location_id === l.id))
+        .map(l => l.id);
+
     return {
         fecha,
         asignaciones: listaFinal,
@@ -605,7 +614,9 @@ function planificar(contexto) {
         sinCubrir,
         porLocalizacion,
         incompletas: incompletas.map(v => v.nombre),
-        todoCubierto: incompletas.length === 0 && sinCubrir.length === 0,
+        sinRegla,
+        minimosCubiertos: incompletas.length === 0 && sinCubrir.length === 0,
+        todoCubierto: incompletas.length === 0 && sinCubrir.length === 0 && sinRegla.length === 0,
         descartes,
         compromisos: unicos.length,
         compromisosDuplicados: duplicados,
