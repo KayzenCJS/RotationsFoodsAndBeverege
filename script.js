@@ -809,7 +809,12 @@ function getFilteredEmployees() {
         const statusMap = { 'status-available': 'available', 'status-break': 'break', 'status-training': 'training', 'status-dayoff': 'dayoff', 'status-holiday': 'holiday' };
         const statusValue = statusMap[status.class] || 'available';
 
-        const matchesSearch = !searchTerm || emp.name.toLowerCase().includes(searchTerm) || `${emp.name}`.toLowerCase().includes(searchTerm) || getRoleName(emp.role).toLowerCase().includes(searchTerm) || emp.nationality.toLowerCase().includes(searchTerm);
+        // Enhanced search: supports partial names, case-insensitive, first/last name matching
+        const matchesSearch = !searchTerm || 
+            emp.name.toLowerCase().includes(searchTerm) || 
+            emp.name.split(' ').some(part => part.toLowerCase().startsWith(searchTerm)) ||
+            getRoleName(emp.role).toLowerCase().includes(searchTerm) || 
+            emp.nationality.toLowerCase().includes(searchTerm);
         const matchesRole = !roleFilter || emp.role === roleFilter;
         const matchesStatus = !statusFilter || statusValue === statusFilter;
         const matchesType = !typeFilter || (typeFilter === 'foods' ? currentType !== 'retail' : currentType === 'retail');
@@ -932,6 +937,9 @@ function renderEmployees() {
     const countBadge = document.getElementById('employeeCountBadge');
     if (!container) return;
 
+    // Preserve scroll position before re-rendering
+    const scrollPos = container.scrollTop || 0;
+
     const filtered = getFilteredEmployees();
 
     if (countBadge) {
@@ -1005,6 +1013,11 @@ function renderEmployees() {
         </div>
     `;
 
+    // Restore scroll position after re-rendering
+    if (scrollPos > 0) {
+        container.scrollTop = scrollPos;
+    }
+
     updateStats();
 }
 
@@ -1024,12 +1037,23 @@ document.addEventListener('click', (ev) => {
         return;
     }
     ev.preventDefault();
+    ev.stopPropagation(); // Prevent scroll to top
+    
+    // Preserve scroll position
+    const container = document.getElementById('employeesList');
+    const scrollPos = container ? container.scrollTop : 0;
+    
     switch (btn.dataset.act) {
         case 'view':   openEmployeeDetail(emp.id);   break;
         case 'edit':   editEmployee(emp.id);         break;
         case 'status': toggleEmployeeStatus(emp.id); break;
         case 'delete': handleDeleteEmployee(emp.id); break;
     }
+    
+    // Restore scroll position after action
+    setTimeout(() => {
+        if (container) container.scrollTop = scrollPos;
+    }, 0);
 });
 
 // ============================================
@@ -1599,6 +1623,29 @@ async function handleDeleteEmployee(id) {
         updateLocationAssignmentsForAll(); // Optimized: Update only assignments
         populateEmployeeSelects();
         renderBreakManagement();
+        
+        // Re-validate import panel if open and using this employee
+        const importModal = document.getElementById('excelImportModal');
+        if (importModal && importModal.style.display === 'flex') {
+          // Trigger re-validation to update employee references
+          if (typeof ExcelImportUI !== 'undefined' && ExcelImportUI.state) {
+            // If there are validated rows, re-validate them
+            if (ExcelImportUI.state.validated && ExcelImportUI.state.validated.rows) {
+              ExcelImportUI.state.validated.rows.forEach(row => {
+                if (row.normalized.employee_id === id) {
+                  row.normalized.employee_id = null;
+                  row.status = 'review';
+                  row.issues = row.issues || [];
+                  if (!row.issues.some(i => i.code === 'employee_not_found')) {
+                    row.issues.push({ code: 'employee_not_found' });
+                  }
+                }
+              });
+              ExcelImportUI.render();
+            }
+          }
+        }
+        
         showNotification(t('notify.employeeDeleted'), 'success');
     } catch (error) {
         console.error('Error deleting employee:', error);
@@ -6157,6 +6204,7 @@ const I18N = {
         'imp.sample': 'Ejemplo',
         'imp.schedule': 'Horario',
         'imp.selectEmployeeShort': 'Elegir empleado...',
+        'imp.searchEmployee': 'Buscar empleado...',
         'imp.selectFile': 'Selecciona un archivo de Excel',
         'imp.selectFileHint': 'Formatos aceptados: .xlsx y .xls. Se analizará antes de guardar nada.',
         'imp.selectLocationShort': 'Elegir locación...',
@@ -7254,6 +7302,7 @@ const I18N = {
         'imp.sample': 'Sample',
         'imp.schedule': 'Schedule',
         'imp.selectEmployeeShort': 'Select employee...',
+        'imp.searchEmployee': 'Search employee...',
         'imp.selectFile': 'Select an Excel file',
         'imp.selectFileHint': 'Accepted formats: .xlsx and .xls. It will be analyzed before anything is saved.',
         'imp.selectLocationShort': 'Select location...',

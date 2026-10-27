@@ -1706,8 +1706,19 @@ img, video, iframe { max-width:100%; height:auto; }
    IMPORTADOR DE EXCEL  (§20 - respeta tema, responsive, scroll interno)
    ========================================================================== */
 
-.imp-modal-content { max-width: 980px; }
-.imp-body { max-height: 62vh; overflow-y: auto; }
+.imp-modal-content { 
+  max-width: 980px; 
+  width: 95%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.imp-body { 
+  max-height: 62vh; 
+  overflow-y: auto; 
+  flex: 1;
+  min-height: 0;
+}
 
 /* --- Stepper --- */
 .imp-stepper {
@@ -1715,6 +1726,8 @@ img, video, iframe { max-width:100%; height:auto; }
     padding: .75rem 1.5rem;
     background: var(--bg-section);
     border-bottom: 1px solid var(--border-soft);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 .imp-step { display:flex; align-items:center; gap:.4rem; padding:.3rem .55rem; border-radius:999px; font-size:.78rem; }
 .imp-step-n {
@@ -1928,12 +1941,28 @@ img, video, iframe { max-width:100%; height:auto; }
 
 /* --- Responsive --- */
 @media (max-width: 640px) {
-    .imp-modal-content { width: 96%; }
+    .imp-modal-content { width: 96%; max-height: 95vh; }
     .imp-body { max-height: 66vh; }
     .imp-stepper { padding: .5rem .75rem; }
     .imp-step-l { display: none; }
     .imp-step.active .imp-step-l { display: inline; }
     .imp-summary-cards .imp-card { flex-basis: calc(50% - .75rem); }
+    .imp-map-scroll, .imp-table-scroll { max-height: 40vh; }
+    .imp-map-select, .imp-inline-select { max-width: 100%; }
+    .imp-target-row { flex-direction: column; align-items: stretch; }
+    .imp-target-row select { width: 100%; }
+    .imp-reason { max-width: 100%; }
+    .imp-history-list { max-height: 150px; }
+}
+
+@media (max-width: 480px) {
+    .imp-modal-content { width: 98%; }
+    .imp-body { max-height: 70vh; }
+    .imp-summary-cards .imp-card { flex-basis: 100%; }
+    .imp-actions { flex-direction: column; }
+    .imp-actions .btn { width: 100%; margin-bottom: 0.5rem; }
+    .imp-confirm-list { flex-direction: column; gap: 0.5rem; }
+    .imp-table td, .imp-table th { font-size: 0.75rem; padding: 0.4rem 0.5rem; }
     .imp-map-select { max-width: 150px; }
     .imp-history-row { flex-direction: column; align-items: flex-start; gap:.2rem; }
 }

@@ -30,7 +30,9 @@ const ExcelImportUI = (() => {
     validated: null,
     target: 'foods',
     importing: false,
-    history: []
+    history: [],
+    employeeSearchQuery: '',  // Search query for employee selector
+    scrollPosition: 0        // Preserve scroll position across renders
   };
 
   // Columnas de StoryManager disponibles para el mapeo manual (§6)
@@ -108,6 +110,8 @@ const ExcelImportUI = (() => {
         <div class="form-content imp-body">${body}</div>
         <div class="form-actions imp-actions">${renderActions()}</div>
       </div>`;
+    // Restore scroll position after render
+    setTimeout(restoreScrollPosition, 0);
   }
 
   function renderStepper() {
@@ -522,11 +526,38 @@ const ExcelImportUI = (() => {
   function empSelect(rowIdx, rowPos) {
     const cur = state.rows[rowIdx];
     const sugg = cur && cur.__candidates ? cur.__candidates : [];
-    const opts = sugg.length
-      ? sugg.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join('')
-      : (employees || []).slice(0, 300).map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join('');
-    return `<select class="imp-inline-select" onchange="impAssignEmployee(${rowIdx}, this.value)">
-      <option value="">${esc(t('imp.selectEmployeeShort'))}</option>${opts}</select>`;
+    const searchQuery = state.employeeSearchQuery.toLowerCase().trim();
+    
+    let empList = sugg.length ? sugg : (employees || []);
+    
+    // Filter by search query if present
+    if (searchQuery) {
+      empList = empList.filter(e => {
+        const name = (e.name || '').toLowerCase();
+        return name.includes(searchQuery);
+      });
+    }
+    
+    // Limit to prevent performance issues
+    const opts = empList.slice(0, 300).map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join('');
+    
+    const searchInput = sugg.length ? '' : `
+      <input type="text" 
+             class="imp-emp-search" 
+             placeholder="${esc(t('imp.searchEmployee') || 'Search employee...')}"
+             value="${esc(state.employeeSearchQuery)}"
+             oninput="impOnEmployeeSearch(this.value)"
+             onclick="event.stopPropagation()"
+             style="margin-bottom:0.25rem;padding:0.25rem 0.4rem;font-size:0.8rem;width:100%;max-width:190px;border:1px solid var(--border-soft);border-radius:4px;" />
+    `;
+    
+    return `
+      <div style="display:flex;flex-direction:column;">
+        ${searchInput}
+        <select class="imp-inline-select" onchange="impAssignEmployee(${rowIdx}, this.value)">
+          <option value="">${esc(t('imp.selectEmployeeShort'))}</option>${opts}
+        </select>
+      </div>`;
   }
 
   function locSelect(rowIdx) {
@@ -706,7 +737,8 @@ const ExcelImportUI = (() => {
   async function open() {
     state = Object.assign(state, {
       step: 1, file: null, workbook: null, rows: [], validated: null,
-      lastSummary: null, format: 'flat', scheduleDate: '', sheetMeta: null
+      lastSummary: null, format: 'flat', scheduleDate: '', sheetMeta: null,
+      employeeSearchQuery: '', scrollPosition: 0
     });
     await loadHistory();
     render();
@@ -834,6 +866,11 @@ const ExcelImportUI = (() => {
     // se respetan tal cual, sin inventar horario ni empleado.
     if (r.needs_review) issues.unshift({ code: PARSER_ISSUE_KEYS[r.needs_review] || 'imp.issueOther' });
 
+    // Check if employee was deleted after being selected
+    if (r.employee_id && !empMatch.employee) {
+      issues.push({ code: 'employee_not_found' });
+    }
+
     return {
       index: r.__index,
       kind: r.kind,
@@ -883,7 +920,28 @@ const ExcelImportUI = (() => {
   // §19 mantener / actualizar / omitir
   function onChangedAction(rowIdx, value) {
     state.rows[rowIdx].action = value || null;
+    preserveScrollPosition();
     render();
+  }
+
+  function onEmployeeSearch(query) {
+    state.employeeSearchQuery = query;
+    preserveScrollPosition();
+    render();
+  }
+
+  function preserveScrollPosition() {
+    const body = document.querySelector('.imp-body');
+    if (body) {
+      state.scrollPosition = body.scrollTop;
+    }
+  }
+
+  function restoreScrollPosition() {
+    const body = document.querySelector('.imp-body');
+    if (body && state.scrollPosition > 0) {
+      body.scrollTop = state.scrollPosition;
+    }
   }
 
   async function validate() {
@@ -974,7 +1032,10 @@ const ExcelImportUI = (() => {
         imported_by: (localStorage.getItem('userRole') || 'admin')
       })
     })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then((sum) => {
         state.lastSummary = sum;
         state.importing = false;
@@ -984,7 +1045,8 @@ const ExcelImportUI = (() => {
         // refresca la vista para que se vean los cambios
         if (typeof loadInitialData === 'function') loadInitialData();
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('Import commit error:', err);
         state.importing = false;
         render();
         showNotification(t('imp.errCommit'), 'error');
@@ -1007,7 +1069,7 @@ const ExcelImportUI = (() => {
 
   return { open, close, render, onFileChosen, analyze, onSheetChange, onMapChange, rebuildRows,
            assignEmployee, assignLocation, excludeRow, validate, commit, next, back,
-           onDateChange, analyzeSheet, onChangedAction,
+           onDateChange, analyzeSheet, onChangedAction, onEmployeeSearch,
            state, renderStep, counts };
 })();
 
@@ -1018,6 +1080,7 @@ window.impOnSheetChange = (v) => ExcelImportUI.onSheetChange(v);
 window.impOnMapChange = (o, c, v) => ExcelImportUI.onMapChange(o, c, v);
 window.impOnDateChange = (v) => ExcelImportUI.onDateChange(v);
 window.impOnChangedAction = (r, v) => ExcelImportUI.onChangedAction(r, v);
+window.impOnEmployeeSearch = (v) => ExcelImportUI.onEmployeeSearch(v);
 window.impRebuildRows = () => ExcelImportUI.rebuildRows();
 window.impAssignEmployee = (r, v) => ExcelImportUI.assignEmployee(r, v);
 window.impAssignLocation = (r, v) => ExcelImportUI.assignLocation(r, v);
